@@ -1,0 +1,145 @@
+/* Font properties */
+.sample-font-family {
+  font-family: "Custom font name", Arial, sans-serif;
+}
+
+.sample-font-size {
+  font-size: 30px;
+}
+
+.sample-font-style {
+  font-style: italic;
+}
+
+.sample-font-weight {
+  font-weight: bold;
+}
+
+/* This can be a value (where 1 is baseline) or a percentage (where 100% is baseline) */
+.sample-line-height {
+  line-height: 1.4;
+}
+
+.sample-font {
+  font: italic bold 30px/1.4 Arial;
+}
+
+/* Text Properties */
+.sample-text-align {
+  text-align: center;
+}
+
+.sample-text-decoration {
+  text-decoration: underline;
+}
+
+.sample-text-transform {
+  text-transform: capitalize;
+}
+
+/* Colors */
+.sample-01 {
+  color: limegreen;
+}
+
+.sample-02 {
+  color: #666;
+}
+
+.sample-03 {
+  color: rgba(43,67,123,1);
+}
+
+.sample-04 {
+  color: hsla(343, 100%, 40%, 1);
+}
+
+/* Backgrounds */
+.sample-05 {
+  background-color: #ffa3fa;
+}
+
+.sample-06 {
+  background-color: #ffa3fa;
+  background-image: url(http://67.media.tumblr.com/30b1b0d0a42bca3759610242a1ff0348/tumblr_nnjxy1GQAA1tpo3v2o1_540.jpg);
+  color: #fff;
+  height: 600px;
+  width: 600px;
+}
+
+.sample-07 {
+  background-color: #ffa3fa;
+  background-image: url(http://67.media.tumblr.com/30b1b0d0a42bca3759610242a1ff0348/tumblr_nnjxy1GQAA1tpo3v2o1_540.jpg);
+  background-repeat: repeat-y;
+  color: #fff;
+  height: 600px;
+  width: 600px;
+}
+
+.sample-08 {
+  background-color: #ffa3fa;
+  background-image: url(http://67.media.tumblr.com/30b1b0d0a42bca3759610242a1ff0348/tumblr_nnjxy1GQAA1tpo3v2o1_540.jpg);
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #222;
+  height: 300px;
+  width: 300px;
+}
+
+.sample-09 {
+  background: #ffa3fa bottom right no-repeat;
+  color: #222;
+  height: 600px;
+  width: 600px;
+}
+
+/* Margin, Padding, Border */
+.sample-10 {
+  background-color: rgba(97, 255, 213, 1);
+  height: 200px;
+  margin: 25px auto;
+  width: 200px;
+}
+
+.sample-11 {
+  background-color: rgba(97, 255, 213, 1);
+  height: 200px;
+  padding: 50px;
+  width: 200px;
+}
+
+.sample-12 {
+  background-color: rgba(97, 255, 213, 1);
+  border-left: 5px solid #222;
+  height: 200px;
+  padding: 50px;
+  width: 200px;
+}
+
+.sample-13 {
+  background-color: rgba(97, 255, 213, 1);
+  border: 10px solid #222;
+  height: 200px;
+  padding: 50px;
+  margin: 50px;
+  width: 200px;
+}
+
+.sample-14 {
+  background-color: rgba(97, 255, 213, 1);
+  border: 10px solid #222;
+  height: 200px;
+  padding: 50px;
+  margin: 50px;
+  width: 200px;
+}
+
+.sample-15 {
+  background-color: rgba(97, 255, 213, 1);
+  border: 10px solid #222;
+  height: 200px;
+  overflow: scroll;
+  padding: 50px;
+  margin: 50px;
+  width: 200px;
+}
