@@ -677,6 +677,11 @@ app.get('/api/analytics', auth, requireRole('org_admin'), (req, res) => {
 
 // ---------- static frontend ----------
 app.use(express.static(path.join(__dirname, 'public')));
+// The single-page app lives under /app; everything else falls back to the
+// marketing landing page (public/index.html).
+app.get(['/app', '/app/*'], (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'app.html'))
+);
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

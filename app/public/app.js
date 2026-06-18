@@ -73,11 +73,12 @@ function render() {
 }
 
 /* ---------------- AUTH ---------------- */
-let authMode = 'login';
+let authMode = location.hash.replace('#', '') === 'signup' ? 'signup' : 'login';
 function renderAuth(root) {
   root.innerHTML = `
   <div class="auth-wrap">
     <div class="auth-card">
+      <a href="/" class="muted" style="font-size:13px;display:inline-block;margin-bottom:14px">← Back to home</a>
       <div class="brand-logo"><span class="mark">⭐</span> StarBoard</div>
       <p class="muted" style="margin-top:8px">Gamify work. Reward people. Grow culture.</p>
       <div class="auth-tabs">

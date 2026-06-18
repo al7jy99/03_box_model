@@ -3,14 +3,260 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StarBoard — Employee Gamification Platform</title>
+  <title>StarBoard — Gamify work. Reward people. Grow culture.</title>
+  <meta name="description" content="StarBoard is the employee gamification platform where teams earn stars for tasks, challenges and ideas — then redeem them for real rewards like free pizza, gift cards and days off." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⭐</text></svg>" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="landing.css" />
 </head>
 <body>
-  <div id="root"></div>
-  <div id="modal-root"></div>
-  <div class="toast-wrap" id="toasts"></div>
-  <script src="app.js"></script>
+
+  <!-- NAV -->
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a href="/" class="logo"><span class="mark">⭐</span> StarBoard</a>
+      <nav class="nav-links">
+        <a class="link" href="#features">Features</a>
+        <a class="link" href="#how">How it works</a>
+        <a class="link" href="#portals">Portals</a>
+        <a class="link" href="#rewards">Rewards</a>
+        <a class="link" href="#pricing">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="btn ghost" href="/app">Sign in</a>
+        <a class="btn" href="/app#signup">Get started</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="badge-tag">🚀 The all-in-one workplace gamification SaaS · <b>Free to start</b></div>
+      <h1>Turn everyday work into<br/><span class="grad">points, stars &amp; rewards</span></h1>
+      <p class="lead">
+        StarBoard motivates your team to crush tasks, win challenges and share ideas — earning
+        stars they redeem for real rewards like free pizza, gift cards and extra days off.
+      </p>
+      <div class="cta-row">
+        <a class="btn lg" href="/app#signup">Start free — create your org →</a>
+        <a class="btn ghost lg" href="/app">Explore the demo</a>
+      </div>
+      <div class="note">No credit card required · Set up in under 2 minutes</div>
+
+      <!-- App preview -->
+      <div class="preview reveal">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <div class="preview-body">
+          <div class="mini-stat"><div class="l">⭐ Stars to spend</div><div class="v star">1,240</div></div>
+          <div class="mini-stat"><div class="l">📈 Total points</div><div class="v">8,560</div></div>
+          <div class="mini-stat"><div class="l">🎖️ Level</div><div class="v">12</div></div>
+          <div class="mini-stat"><div class="l">🏆 Rank</div><div class="v">#2</div></div>
+        </div>
+        <div class="preview-foot">
+          <span class="chip">✅ Task approved · +50★</span>
+          <span class="chip">🔥 Challenge complete · +80★</span>
+          <span class="chip">💡 Idea implemented · +100★</span>
+          <span class="chip">🍕 Redeemed: Free Pizza</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STATS STRIP -->
+  <div class="stats-strip">
+    <div class="wrap">
+      <div class="grid">
+        <div><div class="num">3×</div><div class="cap">Role-based portals</div></div>
+        <div><div class="num">+34%</div><div class="cap">Avg. engagement lift</div></div>
+        <div><div class="num">∞</div><div class="cap">Custom rewards</div></div>
+        <div><div class="num">2 min</div><div class="cap">To get started</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Everything in one place</div>
+        <h2>A complete engagement engine</h2>
+        <p>Tasks, challenges, ideas and rewards — all wired into one points economy that keeps your people motivated.</p>
+      </div>
+      <div class="features">
+        <div class="feature reveal"><div class="ic">✅</div><h3>Task tracking</h3><p>Assign or open tasks for anyone to claim. Employees submit, managers approve, and points are awarded automatically.</p></div>
+        <div class="feature reveal"><div class="ic">🔥</div><h3>Team challenges</h3><p>Run goal-based challenges — wellness streaks, sales sprints, learning goals. Progress auto-rewards on completion.</p></div>
+        <div class="feature reveal"><div class="ic">💡</div><h3>Idea box</h3><p>Give everyone a space to propose ideas, upvote the best ones, and earn bonus stars when ideas get approved or shipped.</p></div>
+        <div class="feature reveal"><div class="ic">🎁</div><h3>Rewards store</h3><p>Build a catalog of anything you can offer — pizza, coffee, gift cards, a day off. Employees redeem stars; you fulfil.</p></div>
+        <div class="feature reveal"><div class="ic">🏆</div><h3>Levels &amp; leaderboards</h3><p>An XP curve, levels, achievement badges and a live leaderboard turn progress into friendly competition.</p></div>
+        <div class="feature reveal"><div class="ic">📊</div><h3>Admin analytics</h3><p>See engagement at a glance — top performers, pending approvals, stars in circulation and recent activity.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border)">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">How it works</div>
+        <h2>From sign-up to celebration in four steps</h2>
+      </div>
+      <div class="steps">
+        <div class="step reveal"><div class="n">1</div><h4>Create your org</h4><p>Sign up and get an isolated workspace with an admin account in under two minutes.</p></div>
+        <div class="step reveal"><div class="n">2</div><h4>Invite your team</h4><p>Add employees, set up tasks and challenges, and stock your rewards catalog.</p></div>
+        <div class="step reveal"><div class="n">3</div><h4>Earn stars</h4><p>People complete work, finish challenges and submit ideas — racking up points and stars.</p></div>
+        <div class="step reveal"><div class="n">4</div><h4>Redeem rewards</h4><p>Employees cash in stars for real perks. You approve and fulfil. Everybody wins.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PORTALS -->
+  <section id="portals">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Built for everyone</div>
+        <h2>Three portals, one platform</h2>
+        <p>Purpose-built experiences for the platform owner, each organization's admins, and the people doing great work.</p>
+      </div>
+      <div class="portals">
+        <div class="portal super reveal">
+          <span class="tag">SUPER ADMIN</span>
+          <div class="ic">🛡️</div>
+          <h3>Platform owner</h3>
+          <p>Run the whole SaaS from one console.</p>
+          <ul>
+            <li>Provision &amp; manage customer organizations</li>
+            <li>Control plans and seat limits</li>
+            <li>Suspend or remove tenants</li>
+            <li>Platform-wide usage analytics</li>
+          </ul>
+        </div>
+        <div class="portal admin reveal">
+          <span class="tag">ORG ADMIN</span>
+          <div class="ic">👑</div>
+          <h3>Organization admin</h3>
+          <p>Everything you need to run engagement.</p>
+          <ul>
+            <li>Manage members, roles and points</li>
+            <li>Create &amp; approve tasks and challenges</li>
+            <li>Review ideas, build the rewards catalog</li>
+            <li>Fulfil redemptions, view analytics</li>
+          </ul>
+        </div>
+        <div class="portal user reveal">
+          <span class="tag">EMPLOYEE</span>
+          <div class="ic">🙌</div>
+          <h3>Team members</h3>
+          <p>A fun, motivating place to do great work.</p>
+          <ul>
+            <li>Claim tasks and join challenges</li>
+            <li>Submit and upvote ideas</li>
+            <li>Redeem stars in the rewards shop</li>
+            <li>Track level, badges and rank</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REWARDS SHOWCASE -->
+  <section id="rewards" style="background:var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border)">
+    <div class="wrap rewards-wrap">
+      <div class="rewards-copy reveal">
+        <h2>Rewards your team actually wants</h2>
+        <p>Stars aren't just a number — they buy real perks. Offer anything your organization can provide and let people choose what motivates them.</p>
+        <div class="li"><span>🍕</span> Free pizza lunches &amp; coffee runs</div>
+        <div class="li"><span>🏖️</span> Extra paid days off</div>
+        <div class="li"><span>💳</span> Gift cards &amp; swag</div>
+        <div class="li"><span>🍽️</span> Lunch with leadership &amp; prime parking</div>
+        <a class="btn lg" href="/app#signup" style="margin-top:22px">Start rewarding your team →</a>
+      </div>
+      <div class="rewards-grid reveal">
+        <div class="reward"><div class="ic">🍕</div><div class="t">Free Pizza Lunch</div><div class="c">⭐ 80</div></div>
+        <div class="reward"><div class="ic">☕</div><div class="t">Coffee for a Week</div><div class="c">⭐ 60</div></div>
+        <div class="reward"><div class="ic">🏖️</div><div class="t">Extra Day Off</div><div class="c">⭐ 500</div></div>
+        <div class="reward"><div class="ic">💳</div><div class="t">$25 Gift Card</div><div class="c">⭐ 250</div></div>
+        <div class="reward"><div class="ic">🧥</div><div class="t">Premium Hoodie</div><div class="c">⭐ 200</div></div>
+        <div class="reward"><div class="ic">🍽️</div><div class="t">Lunch with the CEO</div><div class="c">⭐ 400</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section id="pricing">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Simple pricing</div>
+        <h2>Plans that scale with your team</h2>
+        <p>Start free, upgrade when you grow. Every plan includes all three portals and the full points economy.</p>
+      </div>
+      <div class="pricing">
+        <div class="plan reveal">
+          <h3>Free</h3>
+          <div class="price">$0<span>/mo</span></div>
+          <div class="desc">For small teams getting started.</div>
+          <ul>
+            <li>Up to 25 members</li>
+            <li>Tasks, challenges &amp; ideas</li>
+            <li>Rewards store</li>
+            <li>Leaderboard &amp; badges</li>
+          </ul>
+          <a class="btn ghost" href="/app#signup">Get started</a>
+        </div>
+        <div class="plan featured reveal">
+          <span class="pop">MOST POPULAR</span>
+          <h3>Pro</h3>
+          <div class="price">$3<span>/user/mo</span></div>
+          <div class="desc">For growing organizations.</div>
+          <ul>
+            <li>Up to 250 members</li>
+            <li>Everything in Free</li>
+            <li>Advanced analytics</li>
+            <li>Priority support</li>
+          </ul>
+          <a class="btn" href="/app#signup">Start free trial</a>
+        </div>
+        <div class="plan reveal">
+          <h3>Enterprise</h3>
+          <div class="price">Custom</div>
+          <div class="desc">For large companies &amp; custom needs.</div>
+          <ul>
+            <li>Unlimited members</li>
+            <li>Everything in Pro</li>
+            <li>SSO &amp; dedicated success manager</li>
+            <li>Custom integrations</li>
+          </ul>
+          <a class="btn ghost" href="/app#signup">Contact sales</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="final-cta">
+    <div class="wrap">
+      <div class="final-card reveal">
+        <h2>Ready to make work rewarding?</h2>
+        <p>Spin up your organization in minutes and watch engagement climb. It's free to start.</p>
+        <a class="btn lg" href="/app#signup">Create your free organization →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="wrap foot-inner">
+      <a href="/" class="logo"><span class="mark">⭐</span> StarBoard</a>
+      <div>Gamify work. Reward people. Grow culture.</div>
+      <div>© 2026 StarBoard · <a href="/app" style="color:var(--brand)">Sign in</a></div>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll-reveal animation
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('show'); io.unobserve(e.target); } });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+  </script>
 </body>
 </html>
