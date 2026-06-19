@@ -50,6 +50,29 @@ function fakeData(method, p) {
     'GET /pm/goals': [{ id: 1, name: 'Grow', status: 'on_track', progress: 60, owner_name: 'A', owner_avatar: '🙂', linked: 2, due_date: '2026-09-01' }],
     'GET /pm/portfolios': [{ id: 1, name: 'OKRs', description: 'd', color: '#34e0ff', progress: 45, project_count: 3 }],
     'GET /pm/workload': [{ id: 1, name: 'A', avatar: '🙂', open: 5, overdue: 1, done: 3, capacity: 62 }],
+    'GET /pm/projects/1': { id: 1, name: 'Website', description: 'd', color: '#7c9bff', icon: '🚀', status: 'on_track', progress: 50, task_total: 4, task_done: 2, favorite: true, can_edit: true,
+      team: { name: 'Eng', icon: '⚙️' }, owner: { id: 1, name: 'Me', avatar: '🙂' },
+      members: [{ id: 1, name: 'Me', avatar: '🙂', title: 't', role: 'employee', access: 'editor' }, { id: 2, name: 'Guest', avatar: '🧑', role: 'guest', access: 'commenter' }],
+      sections: [{ id: 10, name: 'To Do', position: 0 }, { id: 11, name: 'Doing', position: 1 }],
+      custom_fields: [{ id: 5, name: 'Platforms', type: 'multi_select', options: ['iOS', 'Web'] }, { id: 6, name: 'Reviewer', type: 'people', options: [] }, { id: 7, name: 'Launch', type: 'date', options: [] }],
+      rules: [], status_updates: [{ id: 1, status: 'on_track', title: 'Good', body: 'b', author: 'Me', created_at: '2026-01-01 00:00:00' }],
+      form: { enabled: false, title: 'Submit', fields: [] } },
+    'GET /pm/projects/1/tasks': [
+      { id: 1, name: 'Design', section_id: 10, completed: 0, priority: 'high', due_date: '2026-06-20', start_date: '2026-06-18', is_milestone: 0, task_type: 'task', multihomed_here: false, tags: [{ id: 1, name: 'design', color: '#b56bff' }], assignee: { id: 1, name: 'Me', avatar: '🙂' }, counts: { subtasks: 2, subtasks_done: 1, comments: 1, deps: 0, likes: 0, followers: 1, attachments: 0 }, blocked_by: [] },
+      { id: 2, name: 'Build', section_id: 11, completed: 0, priority: 'medium', due_date: '2026-06-25', start_date: '2026-06-21', is_milestone: 0, task_type: 'approval', approval_status: 'pending', multihomed_here: true, tags: [], assignee: null, counts: { subtasks: 0, comments: 0, deps: 1 }, blocked_by: [1] },
+    ],
+    'GET /pm/tags': [{ id: 1, name: 'design', color: '#b56bff', uses: 3 }],
+    'GET /pm/tasks/1': { id: 1, name: 'Design', notes: 'n', section_id: 10, project_id: 1, assignee_id: 1, completed: 0, priority: 'high', is_milestone: 0,
+      task_type: 'task', approval_status: '', recurrence: 'weekly', recur_interval: 2, recur_weekdays: '1,3', due_date: '2026-06-20', start_date: '2026-06-18',
+      project: { id: 1, name: 'Website', color: '#7c9bff', icon: '🚀' }, assignee: { id: 1, name: 'Me', avatar: '🙂' }, creator: { id: 1, name: 'Me', avatar: '🙂' },
+      tags: [{ id: 1, name: 'design', color: '#b56bff' }], counts: { likes: 1, subtasks: 1 }, liked: false,
+      subtasks: [{ id: 9, name: 'Sub', completed: 0, assignee: null }],
+      followers: [{ id: 1, name: 'Me', avatar: '🙂' }], dependencies: [], attachments: [{ id: 1, name: 'shot.png', kind: 'file', mime: 'image/png', size: 1024 }],
+      comments: [{ id: 1, author: 'Me', avatar: '🙂', body: 'hi @guest', created_at: '2026-01-01 00:00:00', likes: 0, liked: false }],
+      activity: [{ type: 'created', author: 'Me', avatar: '🙂', created_at: '2026-01-01 00:00:00' }],
+      custom_values: [{ field_id: 5, value: 'iOS' }],
+      custom_fields: [{ id: 5, name: 'Platforms', type: 'multi_select', options: ['iOS', 'Web'] }, { id: 6, name: 'Reviewer', type: 'people', options: [] }, { id: 7, name: 'Launch', type: 'date', options: [] }],
+      homes: [{ id: 1, name: 'Website', color: '#7c9bff', icon: '🚀', section_id: 10, is_primary: true }] },
     'GET /pm/reporting': { totalTasks: 10, completed: 6, overdue: 2, projects: 3, completionRate: 60,
       byPriority: [{ priority: 'high', c: 2 }, { priority: 'medium', c: 3 }, { priority: 'low', c: 1 }, { priority: 'none', c: 1 }],
       byProject: [{ name: 'Website', color: '#7c9bff', total: 4, done: 2 }],
@@ -98,7 +121,7 @@ global.innerHeight = 800;
 async function main() {
   // Eval app.js once, capturing internal references so the driver can reuse
   // the same module scope (strict-mode eval does not leak bindings).
-  const combined = appJs + '\n;window.__T = { state, boot, renderShell, FX };';
+  const combined = appJs + '\n;window.__T = { state, boot, renderShell, FX, get pmState(){return pmState;}, openProjectView, openTask, renderProjectView, viewBoard, viewList, viewCalendar, viewTimeline, viewDashboard, viewOverview };';
   try {
     // eslint-disable-next-line no-eval
     (0, eval)(combined);
@@ -137,6 +160,28 @@ async function main() {
   // exercise FX functions directly
   try { T.FX.confetti(10,10,5); T.FX.sound('levelup'); T.FX.floatText('+5',10,10); T.FX.celebrate('🎉','Hi','sub'); T.FX.animateCounts(document.body); }
   catch (e) { errors.push('FX: ' + e.message); }
+
+  // exercise the project detail (all 6 views) + task drawer (org_admin context)
+  CURRENT_ROLE = 'org_admin'; T.state.user = makeUser('org_admin'); T.state.token = 'tok';
+  try {
+    await T.openProjectView(1);
+    for (let i = 0; i < 4; i++) await tick();
+    assert(document.querySelector('.proj-head'), 'project detail shell renders');
+    for (const v of ['board', 'list', 'calendar', 'timeline', 'dashboard', 'overview']) {
+      T.pmState.view = v; T.renderProjectView();
+      for (let i = 0; i < 2; i++) await tick();
+      const pv = document.getElementById('pmView');
+      assert(pv && pv.innerHTML.length > 20, `project view "${v}" renders`);
+    }
+    // open a task drawer — exercises approval/recurrence/custom fields/homes/attachments markup
+    await T.openTask(1);
+    for (let i = 0; i < 4; i++) await tick();
+    const drawer = document.querySelector('.drawer');
+    assert(drawer && drawer.querySelector('#dName'), 'task drawer renders');
+    assert(drawer.querySelector('.recur-builder'), 'recurrence builder renders');
+    assert(drawer.querySelector('.multi-pick'), 'multi-select custom field renders');
+    assert(drawer.querySelector('[data-proof]'), 'image attachment proof button renders');
+  } catch (e) { errors.push('PROJECT/DRAWER: ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 3).join('\n')); }
 
   if (errors.length) { console.log('FAILURES:\n' + errors.join('\n')); process.exit(1); }
   console.log('ALL UI SMOKE TESTS PASSED ✅');

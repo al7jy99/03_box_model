@@ -1102,16 +1102,17 @@ function renderProjectShell() {
         <button class="icon-btn" id="favProj" title="Favorite">${p.favorite ? '⭐' : '☆'}</button>
       </div>
       <div class="row wrap" style="margin-left:auto">
+        ${p.can_edit ? '' : '<span class="pill open" title="You can comment but not edit">👁️ comment-only</span>'}
         <div class="pm-people">${p.members.slice(0, 6).map(m => avatarSm(m, 30)).join('')}<button class="icon-btn" id="projMembers" title="Members">＋</button></div>
         <button class="btn ghost sm" id="projSettings">⚙️</button>
-        <button class="btn sm" id="addTaskTop">+ Add task</button>
+        ${p.can_edit ? '<button class="btn sm" id="addTaskTop">+ Add task</button>' : ''}
       </div>
     </div>
     <div class="view-tabs">${views.map(([v, ic]) => `<button data-view="${v}" class="${pmState.view === v ? 'active' : ''}">${ic} ${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
     <div id="pmView"></div>`;
   document.getElementById('backProjects').addEventListener('click', () => { state.page = 'projects'; renderShell(document.getElementById('root')); });
   document.getElementById('favProj').addEventListener('click', async () => { await api('/pm/projects/' + p.id + '/favorite', { method: 'POST' }); FX.sound('click'); reloadProject(); });
-  document.getElementById('addTaskTop').addEventListener('click', () => quickAddTask(p.sections[0] ? p.sections[0].id : null));
+  if (document.getElementById('addTaskTop')) document.getElementById('addTaskTop').addEventListener('click', () => quickAddTask(p.sections[0] ? p.sections[0].id : null));
   document.getElementById('projMembers').addEventListener('click', projectMembersModal);
   document.getElementById('projSettings').addEventListener('click', projectSettingsModal);
   document.querySelectorAll('.view-tabs [data-view]').forEach(b => b.addEventListener('click', () => { pmState.view = b.dataset.view; renderProjectShell(); }));
@@ -1126,27 +1127,28 @@ const tasksInSection = (sid) => pmState.tasks.filter(t => (t.section_id || null)
 /* ---- Board view ---- */
 function viewBoard() {
   const p = pmState.project;
+  const canEdit = p.can_edit;
   const cols = [...p.sections];
   const noSection = tasksInSection(null);
-  const html = `<div class="board">${cols.map(s => boardCol(s.id, s.name, tasksInSection(s.id))).join('')}
-    ${noSection.length ? boardCol(null, 'No section', noSection) : ''}
-    <div class="board-add"><button class="btn ghost sm" id="addSection">+ Add section</button></div></div>`;
+  const html = `<div class="board">${cols.map(s => boardCol(s.id, s.name, tasksInSection(s.id), canEdit)).join('')}
+    ${noSection.length ? boardCol(null, 'No section', noSection, canEdit) : ''}
+    ${canEdit ? '<div class="board-add"><button class="btn ghost sm" id="addSection">+ Add section</button></div>' : ''}</div>`;
   document.getElementById('pmView').innerHTML = html;
-  document.getElementById('addSection').addEventListener('click', async () => {
+  if (document.getElementById('addSection')) document.getElementById('addSection').addEventListener('click', async () => {
     const name = prompt('Section name'); if (!name) return;
     await api('/pm/projects/' + p.id + '/sections', { method: 'POST', body: { name } }); reloadProject();
   });
-  bindBoard();
+  bindBoard(canEdit);
 }
-function boardCol(sid, name, tasks) {
+function boardCol(sid, name, tasks, canEdit) {
   return `<div class="board-col" data-sec="${sid || ''}">
     <div class="board-col-head"><span>${esc(name)}</span><span class="cnt">${tasks.length}</span></div>
-    <div class="board-cards">${tasks.map(taskCardPM).join('')}</div>
-    <button class="board-quick" data-quick="${sid || ''}">＋ Add task</button>
+    <div class="board-cards">${tasks.map(t => taskCardPM(t, canEdit)).join('')}</div>
+    ${canEdit ? `<button class="board-quick" data-quick="${sid || ''}">＋ Add task</button>` : ''}
   </div>`;
 }
-function taskCardPM(t) {
-  return `<div class="task-card ${t.completed ? 'done' : ''}" data-task="${t.id}" draggable="true">
+function taskCardPM(t, canEdit) {
+  return `<div class="task-card ${t.completed ? 'done' : ''}" data-task="${t.id}" ${canEdit ? 'draggable="true"' : ''}>
     <div class="row" style="align-items:flex-start;gap:8px">
       <button class="check ${t.completed ? 'on' : ''}" data-check="${t.id}">${t.completed ? '✓' : ''}</button>
       <div class="grow">
@@ -1165,11 +1167,12 @@ function taskCardPM(t) {
   </div>`;
 }
 let _dragId = null;
-function bindBoard() {
+function bindBoard(canEdit) {
   document.querySelectorAll('[data-task]').forEach(c => c.addEventListener('click', (e) => { if (e.target.closest('[data-check]')) return; openTask(c.dataset.task); }));
   document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); toggleComplete(b.dataset.check, e); }));
   document.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => quickAddTask(b.dataset.quick || null)));
-  // drag and drop between sections
+  if (!canEdit) return;
+  // drag and drop: move between sections AND reorder within a section
   document.querySelectorAll('.task-card[draggable]').forEach(c => {
     c.addEventListener('dragstart', () => { _dragId = c.dataset.task; c.classList.add('dragging'); });
     c.addEventListener('dragend', () => { _dragId = null; c.classList.remove('dragging'); document.querySelectorAll('.board-col').forEach(x => x.classList.remove('drag-over')); });
@@ -1181,12 +1184,20 @@ function bindBoard() {
       e.preventDefault(); col.classList.remove('drag-over');
       if (!_dragId) return;
       const t = findTask(_dragId); const newSec = col.dataset.sec ? Number(col.dataset.sec) : null;
-      if (!t || (t.section_id || null) === newSec) return;
+      if (!t) return;
+      // compute drop index from cursor position relative to cards in this column
+      const cards = [...col.querySelectorAll('.task-card')].filter(c => c.dataset.task !== _dragId);
+      let idx = cards.length;
+      for (let i = 0; i < cards.length; i++) { const r = cards[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { idx = i; break; } }
+      const ordered = cards.map(c => Number(c.dataset.task)); ordered.splice(idx, 0, Number(_dragId));
+      const sectionChanged = (t.section_id || null) !== newSec;
       try {
         FX.sound('click');
-        // multi-homed cards move within their membership for THIS project; primary cards move their home section
-        if (t.multihomed_here) await api('/pm/tasks/' + _dragId + '/projects/' + pmState.projectId, { method: 'PATCH', body: { section_id: newSec } });
-        else await api('/pm/tasks/' + _dragId, { method: 'PATCH', body: { section_id: newSec } });
+        if (sectionChanged) {
+          if (t.multihomed_here) await api('/pm/tasks/' + _dragId + '/projects/' + pmState.projectId, { method: 'PATCH', body: { section_id: newSec } });
+          else await api('/pm/tasks/' + _dragId, { method: 'PATCH', body: { section_id: newSec } });
+        }
+        await api('/pm/projects/' + pmState.projectId + '/reorder', { method: 'POST', body: { section_id: newSec, ordered_ids: ordered } });
         reloadProject();
       } catch (err) { toast(err.message, 'error'); }
     });
@@ -1209,27 +1220,54 @@ async function quickAddTask(sectionId) {
   catch (e) { toast(e.message, 'error'); }
 }
 
-/* ---- List view ---- */
+/* ---- List view (with bulk multi-select) ---- */
+let _bulkSel = new Set();
 function viewList() {
   const p = pmState.project;
+  const canEdit = p.can_edit;
+  _bulkSel = new Set();
   const groups = [...p.sections.map(s => [s.id, s.name]), [null, 'No section']];
   const html = `<div class="list-view">${groups.map(([sid, name]) => {
-    const tasks = tasksInSection(sid); if (!tasks.length && sid !== null) return listGroup(sid, name, tasks);
-    return tasks.length ? listGroup(sid, name, tasks) : '';
-  }).join('')}</div>`;
+    const tasks = tasksInSection(sid); if (!tasks.length && sid !== null) return listGroup(sid, name, tasks, canEdit);
+    return tasks.length ? listGroup(sid, name, tasks, canEdit) : '';
+  }).join('')}</div><div id="bulkBar"></div>`;
   document.getElementById('pmView').innerHTML = html || emptyState('No tasks yet', '☰');
-  document.querySelectorAll('[data-task]').forEach(r => r.addEventListener('click', (e) => { if (e.target.closest('[data-check]')) return; openTask(r.dataset.task); }));
+  document.querySelectorAll('.list-row [data-task-open]').forEach(r => r.addEventListener('click', () => openTask(r.dataset.taskOpen)));
   document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); toggleComplete(b.dataset.check, e); }));
   document.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => quickAddTask(b.dataset.quick || null)));
+  document.querySelectorAll('[data-sel]').forEach(b => b.addEventListener('change', () => { b.checked ? _bulkSel.add(Number(b.dataset.sel)) : _bulkSel.delete(Number(b.dataset.sel)); renderBulkBar(); }));
 }
-function listGroup(sid, name, tasks) {
+function listGroup(sid, name, tasks, canEdit) {
   return `<div class="list-group"><div class="list-group-head">${esc(name)} <span class="cnt">${tasks.length}</span></div>
-    ${tasks.map(t => `<div class="list-row ${t.completed ? 'done' : ''}" data-task="${t.id}">
+    ${tasks.map(t => `<div class="list-row ${t.completed ? 'done' : ''}">
+      ${canEdit ? `<input type="checkbox" class="bulk-cb" data-sel="${t.id}" style="width:auto" title="Select"/>` : ''}
       <button class="check ${t.completed ? 'on' : ''}" data-check="${t.id}">${t.completed ? '✓' : ''}</button>
-      <div class="grow tname">${t.is_milestone ? '◆ ' : ''}${esc(t.name)} ${t.tags && t.tags.length ? tagChips(t.tags) : ''}</div>
+      <div class="grow tname" data-task-open="${t.id}" style="cursor:pointer">${t.is_milestone ? '◆ ' : ''}${t.task_type === 'approval' ? '⚖️ ' : ''}${esc(t.name)} ${t.tags && t.tags.length ? tagChips(t.tags) : ''}</div>
       <div class="row" style="gap:8px">${prioPill(t.priority)}${dueChip(t.due_date, t.completed)}${avatarSm(t.assignee, 24)}</div>
     </div>`).join('')}
-    <button class="board-quick" data-quick="${sid || ''}">＋ Add task</button></div>`;
+    ${canEdit ? `<button class="board-quick" data-quick="${sid || ''}">＋ Add task</button>` : ''}</div>`;
+}
+function renderBulkBar() {
+  const bar = document.getElementById('bulkBar'); if (!bar) return;
+  if (!_bulkSel.size) { bar.innerHTML = ''; return; }
+  const people = pmState.people || [];
+  bar.innerHTML = `<div class="bulk-bar">
+    <b>${_bulkSel.size} selected</b>
+    <select id="bulkAssignee"><option value="">Assignee…</option>${people.map(u => `<option value="${u.id}">${esc(u.avatar)} ${esc(u.name)}</option>`).join('')}</select>
+    <select id="bulkPriority"><option value="">Priority…</option>${Object.keys(PRIO).map(p => `<option value="${p}">${PRIO[p][1]}</option>`).join('')}</select>
+    <input type="date" id="bulkDue" title="Due date" style="width:150px"/>
+    <button class="btn success sm" id="bulkDone">✓ Complete</button>
+    <button class="btn danger sm" id="bulkDelete">Delete</button>
+    <button class="btn ghost sm" id="bulkClear">Clear</button>
+  </div>`;
+  const ids = [..._bulkSel];
+  const doBulk = async (patch, del) => { try { const r = await api('/pm/tasks/bulk', { method: 'POST', body: { ids, patch, delete: del } }); toast(`Updated ${r.affected} task${r.affected === 1 ? '' : 's'}`, 'success'); reloadProject(); } catch (e) { toast(e.message, 'error'); } };
+  document.getElementById('bulkAssignee').addEventListener('change', e => doBulk({ assignee_id: e.target.value || null }));
+  document.getElementById('bulkPriority').addEventListener('change', e => doBulk({ priority: e.target.value }));
+  document.getElementById('bulkDue').addEventListener('change', e => doBulk({ due_date: e.target.value || null }));
+  document.getElementById('bulkDone').addEventListener('click', () => doBulk({ completed: true }));
+  document.getElementById('bulkDelete').addEventListener('click', () => { if (confirm(`Delete ${ids.length} tasks?`)) doBulk(null, true); });
+  document.getElementById('bulkClear').addEventListener('click', () => { _bulkSel.clear(); document.querySelectorAll('[data-sel]').forEach(c => c.checked = false); renderBulkBar(); });
 }
 
 /* ---- Calendar view ---- */
@@ -1270,13 +1308,32 @@ function viewTimeline() {
   min.setDate(min.getDate() - 2); max.setDate(max.getDate() + 2);
   const span = Math.max(1, (max - min) / 86400000);
   const pos = (d) => ((new Date(d + 'T00:00:00') - min) / 86400000 / span) * 100;
-  document.getElementById('pmView').innerHTML = `<div class="timeline">${ts.map(t => {
+  const rowH = 38; // keep in sync with CSS .tl-row height
+  document.getElementById('pmView').innerHTML = `<div class="timeline" id="tlWrap"><svg class="tl-arrows" id="tlArrows"></svg>${ts.map((t, i) => {
     const left = pos(t.s), width = Math.max(3, pos(t.e) - left + 100 / span);
-    return `<div class="tl-row" data-task="${t.id}"><div class="tl-label">${t.is_milestone ? '◆ ' : ''}${esc(t.name)}</div>
-      <div class="tl-track"><div class="tl-bar ${t.completed ? 'done' : ''}" style="left:${left}%;width:${width}%;background:${pmState.project.color}">
+    return `<div class="tl-row" data-task="${t.id}" data-i="${i}"><div class="tl-label">${t.is_milestone ? '◆ ' : ''}${esc(t.name)}</div>
+      <div class="tl-track"><div class="tl-bar ${t.completed ? 'done' : ''}" data-bar="${t.id}" style="left:${left}%;width:${width}%;background:${pmState.project.color}">
         ${avatarSm(t.assignee, 18)}<span>${fmtDate(t.s)}${t.e !== t.s ? '–' + fmtDate(t.e) : ''}</span></div></div></div>`;
   }).join('')}</div>`;
   document.querySelectorAll('.tl-row').forEach(r => r.addEventListener('click', () => openTask(r.dataset.task)));
+  // draw dependency arrows (from blocker's bar end to dependent's bar start)
+  requestAnimationFrame(() => {
+    const wrap = document.getElementById('tlWrap'); const svg = document.getElementById('tlArrows');
+    if (!wrap || !svg) return;
+    const wr = wrap.getBoundingClientRect();
+    svg.setAttribute('width', wr.width); svg.setAttribute('height', wr.height);
+    svg.innerHTML = '<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ff5fa2"/></marker></defs>';
+    const barRect = (id) => { const el = svg.parentNode.querySelector(`[data-bar="${id}"]`); return el ? el.getBoundingClientRect() : null; };
+    let drawn = 0;
+    ts.forEach(t => (t.blocked_by || []).forEach(bid => {
+      const from = barRect(bid), to = barRect(t.id); if (!from || !to) return;
+      const x1 = from.right - wr.left, y1 = from.top + from.height / 2 - wr.top;
+      const x2 = to.left - wr.left, y2 = to.top + to.height / 2 - wr.top;
+      const mx = (x1 + x2) / 2;
+      svg.insertAdjacentHTML('beforeend', `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 6},${y2}" fill="none" stroke="#ff5fa2" stroke-width="2" marker-end="url(#ah)" opacity="0.8"/>`);
+      drawn++;
+    }));
+  });
 }
 
 /* ---- Dashboard view ---- */
@@ -1336,7 +1393,10 @@ function renderDrawer(t) {
   const cvals = Object.fromEntries((t.custom_values || []).map(v => [v.field_id, v.value]));
   document.getElementById('modal-root').querySelector('.drawer').innerHTML = `
     <div class="drawer-head">
-      <button class="btn success sm ${t.completed ? '' : 'ghost'}" id="dComplete">${t.completed ? '✓ Completed' : 'Mark complete'}</button>
+      ${t.task_type === 'approval'
+        ? `<div class="row" style="gap:6px"><span class="pill ${t.approval_status === 'approved' ? 'approved' : t.approval_status === 'rejected' ? 'rejected' : t.approval_status === 'changes' ? 'pending' : 'open'}">⚖️ ${t.approval_status || 'pending'}</span>
+           <button class="btn success sm" id="dApprove">Approve</button><button class="btn ghost sm" id="dChanges">Changes</button><button class="btn danger sm" id="dReject">Reject</button></div>`
+        : `<button class="btn success sm ${t.completed ? '' : 'ghost'}" id="dComplete">${t.completed ? '✓ Completed' : 'Mark complete'}</button>`}
       <div class="row" style="gap:6px">
         <button class="icon-btn" id="dLike" title="Like">${t.liked ? '❤️' : '🤍'} ${t.counts.likes || ''}</button>
         <button class="icon-btn" id="dFollow" title="Follow">${'👁️'}</button>
@@ -1352,11 +1412,15 @@ function renderDrawer(t) {
       <label>Start date</label><input type="date" id="dStart" value="${t.start_date || ''}" />
       <label>Priority</label><select id="dPriority">${Object.keys(PRIO).map(p => `<option value="${p}" ${t.priority === p ? 'selected' : ''}>${PRIO[p][1]}</option>`).join('')}</select>
       ${sections.length ? `<label>Section</label><select id="dSection"><option value="">None</option>${sections.map(s => `<option value="${s.id}" ${t.section_id == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
-      <label>Recurrence</label><select id="dRecur">${['none', 'daily', 'weekly', 'monthly'].map(r => `<option value="${r}" ${t.recurrence === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+      <label>Repeat</label>
+      <div class="recur-builder">
+        <select id="dRecur">${[['none', 'Does not repeat'], ['daily', 'Daily'], ['weekdays', 'Every weekday'], ['weekly', 'Weekly'], ['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([r, lbl]) => `<option value="${r}" ${t.recurrence === r ? 'selected' : ''}>${lbl}</option>`).join('')}</select>
+        <span class="recur-extra ${['daily', 'weekly', 'monthly', 'yearly'].includes(t.recurrence) ? '' : 'hidden'}" id="dRecurEvery">every <input type="number" id="dRecurN" min="1" value="${t.recur_interval || 1}" style="width:56px"/> <span id="dRecurUnit">${{ daily: 'days', weekly: 'weeks', monthly: 'months', yearly: 'years' }[t.recurrence] || ''}</span></span>
+        <div class="weekday-pick ${t.recurrence === 'weekly' ? '' : 'hidden'}" id="dWeekdays">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => `<button type="button" data-wd="${i}" class="${(t.recur_weekdays || '').split(',').includes(String(i)) ? 'on' : ''}">${d}</button>`).join('')}</div>
+      </div>
       <label>Milestone</label><div><button class="btn ghost sm" id="dMilestone">${t.is_milestone ? '◆ Yes' : '◇ No'}</button></div>
-      ${cfields.map(f => `<label>${esc(f.name)}</label>${f.type === 'dropdown'
-        ? `<select data-cf="${f.id}"><option value="">—</option>${f.options.map(o => `<option ${cvals[f.id] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
-        : `<input data-cf="${f.id}" type="${f.type === 'number' ? 'number' : 'text'}" value="${esc(cvals[f.id] || '')}" />`}`).join('')}
+      <label>Type</label><div><button class="btn ghost sm" id="dType">${t.task_type === 'approval' ? '⚖️ Approval' : '✓ Task'}</button></div>
+      ${cfields.map(f => `<label>${esc(f.name)}</label>${customFieldInput(f, cvals[f.id], people)}`).join('')}
     </div>
     <div class="d-tags">${tagChips(t.tags)}<button class="tag-add" id="dAddTag">+ Tag</button></div>
     <label>Description</label><textarea id="dNotes" placeholder="Add details…">${esc(t.notes || '')}</textarea>
@@ -1401,11 +1465,41 @@ function renderDrawer(t) {
 }
 function actText(a) { return ({ created: 'created this task', completed: 'completed this task', reopened: 'reopened this task', assigned: 'changed assignee', comment: 'commented', subtask: 'added a subtask', dependency: 'added a dependency', attachment: 'added an attachment', multihome: 'added this to another project', rule: a.detail || 'automation ran' }[a.type] || a.type); }
 function fmtSize(n) { if (!n) return ''; return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+function customFieldInput(f, value, people) {
+  value = value || '';
+  if (f.type === 'dropdown') return `<select data-cf="${f.id}"><option value="">—</option>${f.options.map(o => `<option ${value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  if (f.type === 'people') return `<select data-cf="${f.id}"><option value="">—</option>${(people || []).map(u => `<option value="${u.id}" ${value == u.id ? 'selected' : ''}>${esc(u.avatar)} ${esc(u.name)}</option>`).join('')}</select>`;
+  if (f.type === 'date') return `<input data-cf="${f.id}" type="date" value="${esc(value)}" />`;
+  if (f.type === 'multi_select') { const sel = value.split(',').filter(Boolean); return `<div class="multi-pick" data-cfm="${f.id}">${f.options.map(o => `<button type="button" data-opt="${esc(o)}" class="${sel.includes(o) ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>`; }
+  return `<input data-cf="${f.id}" type="${f.type === 'number' ? 'number' : 'text'}" value="${esc(value)}" />`;
+}
 function attachRow(a) {
+  const isImg = a.kind === 'file' && (a.mime || '').startsWith('image/');
   const label = a.kind === 'file'
     ? `<a href="#" data-dl="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</a> <span class="sub">${fmtSize(a.size)}</span>`
     : (a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>` : esc(a.name));
-  return `<div class="sub-row">${a.kind === 'file' ? '📄' : '🔗'} ${label}<button class="icon-btn sm" data-unatt="${a.id}">✕</button></div>`;
+  return `<div class="sub-row">${a.kind === 'file' ? (isImg ? '🖼️' : '📄') : '🔗'} ${label}<span class="grow"></span>${isImg ? `<button class="btn ghost sm" data-proof="${a.id}" data-name="${esc(a.name)}">🔍 Proof</button>` : ''}<button class="icon-btn sm" data-unatt="${a.id}">✕</button></div>`;
+}
+async function proofModal(attachmentId, name, taskId) {
+  const anns = await api('/pm/attachments/' + attachmentId + '/annotations');
+  const res = await fetch('/api/pm/attachments/' + attachmentId + '/download', { headers: { Authorization: 'Bearer ' + state.token } });
+  const imgUrl = URL.createObjectURL(await res.blob());
+  modal(`<h2>🔍 Proofing — ${esc(name)}</h2><p class="muted">Click the image to drop a pin and leave a note.</p>
+    <div class="proof-wrap"><div class="proof-img" id="proofImg"><img src="${imgUrl}" alt="proof"/>
+      ${anns.map((a, i) => `<span class="proof-pin ${a.resolved ? 'resolved' : ''}" style="left:${a.x * 100}%;top:${a.y * 100}%" title="${esc(a.body)}">${i + 1}</span>`).join('')}
+    </div></div>
+    <div id="proofList">${anns.map((a, i) => `<div class="sub-row"><b>${i + 1}.</b> ${esc(a.body)} <span class="sub">— ${esc(a.author || '')}</span><span class="grow"></span><button class="icon-btn sm" data-resolve="${a.id}">${a.resolved ? '↩' : '✓'}</button><button class="icon-btn sm" data-delann="${a.id}">✕</button></div>`).join('') || '<span class="sub">No notes yet</span>'}</div>
+    <div class="actions"><button class="btn" onclick="closeModal()">Done</button></div>`);
+  document.getElementById('proofImg').addEventListener('click', async (e) => {
+    if (e.target.classList.contains('proof-pin')) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    const body = prompt('Note for this spot:'); if (!body) return;
+    await api('/pm/attachments/' + attachmentId + '/annotations', { method: 'POST', body: { x, y, body } });
+    proofModal(attachmentId, name, taskId);
+  });
+  document.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', async () => { const a = anns.find(x => x.id == b.dataset.resolve); await api('/pm/annotations/' + b.dataset.resolve, { method: 'PATCH', body: { resolved: !a.resolved } }); proofModal(attachmentId, name, taskId); }));
+  document.querySelectorAll('[data-delann]').forEach(b => b.addEventListener('click', async () => { await api('/pm/annotations/' + b.dataset.delann, { method: 'DELETE' }); proofModal(attachmentId, name, taskId); }));
 }
 async function downloadAttachment(id, name) {
   try {
@@ -1433,15 +1527,25 @@ function bindDrawer(t) {
   $('dDue').addEventListener('change', e => patch({ due_date: e.target.value || null }));
   $('dStart').addEventListener('change', e => patch({ start_date: e.target.value || null }));
   $('dPriority').addEventListener('change', e => patch({ priority: e.target.value }));
-  $('dRecur').addEventListener('change', e => patch({ recurrence: e.target.value }));
+  // recurrence builder
+  const recurState = () => ({ recurrence: $('dRecur').value, recur_interval: Number($('dRecurN')?.value) || 1, recur_weekdays: Array.from(document.querySelectorAll('#dWeekdays button.on')).map(b => b.dataset.wd).join(',') });
+  $('dRecur').addEventListener('change', async () => { await patch(recurState()); openTask(id); });
+  if ($('dRecurN')) $('dRecurN').addEventListener('change', () => patch(recurState()));
+  document.querySelectorAll('#dWeekdays button').forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); patch(recurState()); }));
   const sec = $('dSection'); if (sec) sec.addEventListener('change', e => patch({ section_id: e.target.value || null }));
   $('dMilestone').addEventListener('click', async () => { await patch({ is_milestone: !t.is_milestone }); openTask(id); });
-  $('dComplete').addEventListener('click', async (e) => {
+  $('dType').addEventListener('click', async () => { await patch({ task_type: t.task_type === 'approval' ? 'task' : 'approval' }); openTask(id); });
+  if ($('dComplete')) $('dComplete').addEventListener('click', async (e) => {
     try { const u = await api('/pm/tasks/' + id, { method: 'PATCH', body: { completed: !t.completed } });
       if (u.completed) { FX.sound('coin'); FX.confetti(e.clientX, e.clientY, 40); FX.pop('+' + (u.points || 0) + '★', e, '#34e0ff'); await refreshUser(); }
       openTask(id);
     } catch (err) { toast(err.message, 'error'); }
   });
+  // approval decisions
+  const decide = async (decision, e) => { try { const u = await api('/pm/tasks/' + id + '/approval', { method: 'POST', body: { decision } }); if (decision === 'approved') { FX.sound('coin'); FX.confetti(e.clientX, e.clientY, 40); await refreshUser(); } openTask(id); } catch (err) { toast(err.message, 'error'); } };
+  if ($('dApprove')) $('dApprove').addEventListener('click', (e) => decide('approved', e));
+  if ($('dChanges')) $('dChanges').addEventListener('click', (e) => decide('changes', e));
+  if ($('dReject')) $('dReject').addEventListener('click', (e) => decide('rejected', e));
   $('dLike').addEventListener('click', async () => { await api('/pm/like', { method: 'POST', body: { target_type: 'task', target_id: id } }); FX.sound('coin'); openTask(id); });
   $('dFollow').addEventListener('click', async () => { await api('/pm/tasks/' + id + '/follow', { method: 'POST' }); toast('Updated collaborators'); openTask(id); });
   $('dDelete').addEventListener('click', async () => { if (!confirm('Delete this task?')) return; await api('/pm/tasks/' + id, { method: 'DELETE' }); closeDrawer(); });
@@ -1453,6 +1557,14 @@ function bindDrawer(t) {
   // dependencies
   $('dAddDep').addEventListener('click', () => depModal(id));
   document.querySelectorAll('[data-undep]').forEach(b => b.addEventListener('click', async () => { await api('/pm/tasks/' + id + '/dependencies/' + b.dataset.undep, { method: 'DELETE' }); openTask(id); }));
+  // multi-select custom fields
+  document.querySelectorAll('[data-cfm]').forEach(box => box.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => {
+    b.classList.toggle('on');
+    const value = Array.from(box.querySelectorAll('button.on')).map(x => x.dataset.opt).join(',');
+    api('/pm/tasks/' + id + '/fields', { method: 'PATCH', body: { field_id: box.dataset.cfm, value } });
+  })));
+  // proofing — open image attachments
+  document.querySelectorAll('[data-proof]').forEach(b => b.addEventListener('click', () => proofModal(b.dataset.proof, b.dataset.name, id)));
   // attachments — links, file upload, download
   $('dAddAtt').addEventListener('click', async () => { const name = prompt('Attachment name'); if (!name) return; const url = prompt('Link URL (optional)') || ''; await api('/pm/tasks/' + id + '/attachments', { method: 'POST', body: { name, url } }); openTask(id); });
   $('dUploadBtn').addEventListener('click', () => $('dFileInput').click());
@@ -1476,7 +1588,8 @@ function bindDrawer(t) {
   $('dAddTag').addEventListener('click', () => tagPickModal(id));
   // comments
   $('dSendComment').addEventListener('click', async () => { const v = $('dCommentInput').value.trim(); if (!v) return; await api('/pm/tasks/' + id + '/comments', { method: 'POST', body: { body: v } }); FX.sound('whoosh'); openTask(id); });
-  $('dCommentInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('dSendComment').click(); });
+  $('dCommentInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !document.querySelector('.mention-box')) $('dSendComment').click(); });
+  attachMention($('dCommentInput'));
   document.querySelectorAll('[data-likec]').forEach(b => b.addEventListener('click', async () => { await api('/pm/like', { method: 'POST', body: { target_type: 'comment', target_id: b.dataset.likec } }); FX.sound('coin'); openTask(id); }));
 }
 function depModal(taskId) {
@@ -1534,13 +1647,21 @@ function projectModal(teams) {
 }
 async function projectMembersModal() {
   const p = pmState.project;
+  const reopen = () => projectMembersModal();
   modal(`<h2>Project members</h2>
-    <div id="memList">${p.members.map(m => `<div class="row spread member-row">${avatarSm(m, 28)} <span class="grow">${esc(m.name)}</span><button class="icon-btn sm" data-rm="${m.id}">✕</button></div>`).join('')}</div>
-    <label>Add member</label><div class="row"><select id="addMemSel">${pmState.people.filter(u => !p.members.find(m => m.id === u.id)).map(u => `<option value="${u.id}">${esc(u.avatar)} ${esc(u.name)}</option>`).join('')}</select><button class="btn sm" id="addMemBtn">Add</button></div>
+    <div id="memList">${p.members.map(m => `<div class="row spread member-row">${avatarSm(m, 28)} <span class="grow">${esc(m.name)}${m.role === 'guest' ? ' <span class="pill open">guest</span>' : ''}</span>
+      <select class="acc-sel" data-acc="${m.id}" style="width:130px"><option value="editor" ${m.access !== 'commenter' ? 'selected' : ''}>Can edit</option><option value="commenter" ${m.access === 'commenter' ? 'selected' : ''}>Comment only</option></select>
+      <button class="icon-btn sm" data-rm="${m.id}">✕</button></div>`).join('')}</div>
+    <label>Add member or guest</label><div class="row"><select id="addMemSel">${pmState.people.filter(u => !p.members.find(m => m.id === u.id)).map(u => `<option value="${u.id}">${esc(u.avatar)} ${esc(u.name)}${u.role === 'guest' ? ' (guest)' : ''}</option>`).join('')}</select>
+      <select id="addMemAccess" style="width:130px"><option value="editor">Can edit</option><option value="commenter">Comment only</option></select>
+      <button class="btn sm" id="addMemBtn">Add</button></div>
+    <p class="sub" style="margin-top:8px">Tip: create guest accounts under <b>Members</b> to give external collaborators limited, project-only access.</p>
     <div class="actions"><button class="btn ghost" onclick="closeModal()">Done</button></div>`);
-  document.getElementById('addMemBtn').addEventListener('click', async () => { const uid = document.getElementById('addMemSel').value; if (!uid) return; await api('/pm/projects/' + p.id + '/members', { method: 'POST', body: { user_id: Number(uid) } }); closeModal(); reloadProject(); });
-  document.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', async () => { await api('/pm/projects/' + p.id + '/members/' + b.dataset.rm, { method: 'DELETE' }); closeModal(); reloadProject(); }));
+  document.getElementById('addMemBtn').addEventListener('click', async () => { const uid = document.getElementById('addMemSel').value; if (!uid) return; await api('/pm/projects/' + p.id + '/members', { method: 'POST', body: { user_id: Number(uid), access: document.getElementById('addMemAccess').value } }); await reloadProjectData(); reopen(); });
+  document.querySelectorAll('[data-acc]').forEach(s => s.addEventListener('change', async () => { await api('/pm/projects/' + p.id + '/members/' + s.dataset.acc, { method: 'PATCH', body: { access: s.value } }); await reloadProjectData(); toast('Access updated', 'success'); }));
+  document.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', async () => { await api('/pm/projects/' + p.id + '/members/' + b.dataset.rm, { method: 'DELETE' }); await reloadProjectData(); reopen(); }));
 }
+async function reloadProjectData() { pmState.project = await api('/pm/projects/' + pmState.projectId); }
 function postStatusModal() {
   const p = pmState.project;
   modal(`<h2>Post status update</h2><form id="stForm"><label>Status</label><select name="status">${['on_track', 'at_risk', 'off_track', 'on_hold', 'complete'].map(s => `<option value="${s}" ${p.status === s ? 'selected' : ''}>${STAT_LABEL[s]}</option>`).join('')}</select>
@@ -1568,7 +1689,7 @@ async function projectSettingsModal() {
   }
   function setFields() {
     document.getElementById('setBody').innerHTML = `<div id="cfList">${p.custom_fields.map(f => `<div class="row spread member-row"><span class="grow"><b>${esc(f.name)}</b> <span class="sub">${f.type}</span></span><button class="icon-btn sm" data-delf="${f.id}">✕</button></div>`).join('') || '<p class="muted">No custom fields</p>'}</div>
-      <form id="cfForm"><label>Field name</label><input name="name" required /><label>Type</label><select name="type"><option value="text">Text</option><option value="number">Number</option><option value="dropdown">Dropdown</option></select>
+      <form id="cfForm"><label>Field name</label><input name="name" required /><label>Type</label><select name="type"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="people">People</option><option value="dropdown">Dropdown (single)</option><option value="multi_select">Multi-select</option></select>
       <label>Options (dropdown, comma-separated)</label><input name="opts" placeholder="Low, Medium, High" />
       <div class="actions"><button class="btn">Add field</button></div></form>`;
     document.getElementById('cfForm').addEventListener('submit', async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); await api('/pm/projects/' + p.id + '/fields', { method: 'POST', body: { name: f.name, type: f.type, options: f.opts ? f.opts.split(',').map(s => s.trim()) : [] } }); const np = await api('/pm/projects/' + p.id); p.custom_fields = np.custom_fields; setFields(); });
@@ -1604,11 +1725,22 @@ function intakeFormModal(p) {
 }
 
 /* ---------------- My Tasks ---------------- */
+let _myTasksView = 'list';
+let _myCalMonth = null;
 async function pageMyTasks(el) {
   const [tasks] = await Promise.all([api('/pm/my-tasks'), pmPeople()]);
   const today = new Date().toISOString().slice(0, 10);
   const next7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
   const open = tasks.filter(t => !t.completed);
+  el.innerHTML = setHead('My Tasks', `${open.length} open · ${tasks.length} total assigned to you`,
+    `<div class="tabs" style="margin:0"><button data-mv="list" class="${_myTasksView === 'list' ? 'active' : ''}">☰ List</button><button data-mv="calendar" class="${_myTasksView === 'calendar' ? 'active' : ''}">📅 Calendar</button></div>`) +
+    `<div id="myView"></div>`;
+  el.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => { _myTasksView = b.dataset.mv; pageMyTasks(el); }));
+
+  if (_myTasksView === 'calendar') {
+    renderMonthCalendar(document.getElementById('myView'), tasks, _myCalMonth, (m) => { _myCalMonth = m; pageMyTasks(el); }, (id) => openTaskStandalone(id));
+    return;
+  }
   const buckets = {
     '🔴 Overdue': open.filter(t => t.due_date && t.due_date < today),
     '⭐ Today': open.filter(t => t.due_date === today),
@@ -1617,12 +1749,34 @@ async function pageMyTasks(el) {
     '📥 No due date': open.filter(t => !t.due_date),
     '✅ Completed': tasks.filter(t => t.completed),
   };
-  el.innerHTML = setHead('My Tasks', `${open.length} open · ${tasks.length} total assigned to you`) +
-    Object.entries(buckets).map(([name, ts]) => ts.length ? `<div class="pm-sec-label">${name} <span class="cnt">${ts.length}</span></div>
+  document.getElementById('myView').innerHTML = Object.entries(buckets).map(([name, ts]) => ts.length ? `<div class="pm-sec-label">${name} <span class="cnt">${ts.length}</span></div>
       <div class="mytasks">${ts.map(myRow).join('')}</div>` : '').join('') +
     (tasks.length ? '' : emptyState('No tasks assigned to you yet', '🌟'));
   el.querySelectorAll('[data-task]').forEach(r => r.addEventListener('click', e => { if (e.target.closest('[data-check]')) return; openTaskStandalone(r.dataset.task); }));
   el.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', async (e) => { e.stopPropagation(); const t = tasks.find(x => x.id == b.dataset.check); const u = await api('/pm/tasks/' + b.dataset.check, { method: 'PATCH', body: { completed: !t.completed } }); if (u.completed) { FX.sound('coin'); FX.confetti(e.clientX, e.clientY, 36); FX.pop('+' + (u.points || 0) + '★', e, '#34e0ff'); await refreshUser(); } pageMyTasks(el); }));
+}
+// reusable month calendar for a task list
+function renderMonthCalendar(container, tasks, monthRef, onMonth, onOpen) {
+  const dated = tasks.filter(t => t.due_date);
+  const base = monthRef || (dated.length ? new Date(dated[0].due_date + 'T00:00:00') : new Date());
+  const m0 = new Date(base.getFullYear(), base.getMonth(), 1);
+  const year = m0.getFullYear(), month = m0.getMonth();
+  const first = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  const cells = []; for (let i = 0; i < first; i++) cells.push(null); for (let d = 1; d <= days; d++) cells.push(d);
+  const today = new Date().toISOString().slice(0, 10);
+  container.innerHTML = `<div class="cal-head"><button class="btn ghost sm" id="mcPrev">←</button><b>${m0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</b><button class="btn ghost sm" id="mcNext">→</button></div>
+    <div class="cal-grid">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="cal-dow">${d}</div>`).join('')}
+    ${cells.map(d => {
+      if (!d) return `<div class="cal-cell empty"></div>`;
+      const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const ts = dated.filter(t => t.due_date === ds);
+      return `<div class="cal-cell ${ds === today ? 'today' : ''}"><div class="cal-day">${d}</div>
+        ${ts.map(t => `<div class="cal-task ${t.completed ? 'done' : ''}" data-open="${t.id}" style="--c:${t.project_color || '#7c9bff'}">${t.is_milestone ? '◆ ' : ''}${esc(t.name)}</div>`).join('')}</div>`;
+    }).join('')}</div>`;
+  container.querySelector('#mcPrev').addEventListener('click', () => onMonth(new Date(year, month - 1, 1)));
+  container.querySelector('#mcNext').addEventListener('click', () => onMonth(new Date(year, month + 1, 1)));
+  container.querySelectorAll('[data-open]').forEach(c => c.addEventListener('click', () => onOpen(c.dataset.open)));
 }
 function myRow(t) {
   return `<div class="list-row ${t.completed ? 'done' : ''}" data-task="${t.id}">
@@ -1786,4 +1940,68 @@ function searchModal() {
   });
 }
 
+/* ---------------- keyboard shortcuts ---------------- */
+let _gPending = false;
+function initShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    if (e.key === 'Escape') { if (document.getElementById('modal-root').innerHTML) closeModal(); return; }
+    if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!state.user || state.user.role === 'super_admin') return;
+    if (_gPending) {
+      _gPending = false;
+      const map = { p: 'projects', h: 'home', d: 'dashboard', i: 'inbox', m: 'mywork', g: 'goals', r: 'reporting', l: 'leaderboard' };
+      let dest = map[e.key.toLowerCase()];
+      if (dest === 'home' && state.user.role === 'org_admin') dest = 'dashboard';
+      if (dest && ROUTES[state.user.role][dest]) { state.page = dest; renderShell(document.getElementById('root')); }
+      return;
+    }
+    if (e.key === '?') { shortcutsModal(); return; }
+    if (e.key === '/') { e.preventDefault(); searchModal(); return; }
+    if (e.key === 'g') { _gPending = true; setTimeout(() => { _gPending = false; }, 1200); return; }
+    if (e.key === 'c') { // context-create
+      if (pmState.projectId && document.getElementById('pmView') && pmState.project) { quickAddTask(pmState.project.sections[0] ? pmState.project.sections[0].id : null); }
+      else if (state.page === 'projects') document.getElementById('newProject')?.click();
+      else if (state.page === 'goals') document.getElementById('newGoal')?.click();
+    }
+  });
+}
+function shortcutsModal() {
+  modal(`<h2>⌨️ Keyboard shortcuts</h2>
+    <table style="width:100%"><tbody>
+    ${[['?', 'Show this help'], ['/', 'Search'], ['c', 'Create (task / project / goal in context)'],
+      ['g then p', 'Go to Projects'], ['g then m', 'Go to My Tasks'], ['g then i', 'Go to Inbox'],
+      ['g then d/h', 'Go to Dashboard / Home'], ['g then g', 'Go to Goals'], ['g then r', 'Go to Reporting'], ['Esc', 'Close dialog']]
+      .map(([k, d]) => `<tr><td style="width:120px"><kbd>${k}</kbd></td><td class="sub">${d}</td></tr>`).join('')}
+    </tbody></table><div class="actions"><button class="btn" onclick="closeModal()">Got it</button></div>`);
+}
+
+/* ---------------- @mention autocomplete ---------------- */
+function attachMention(input) {
+  const people = pmState.people || [];
+  let box = null;
+  const close = () => { if (box) { box.remove(); box = null; } };
+  input.addEventListener('input', () => {
+    const v = input.value, pos = input.selectionStart;
+    const m = v.slice(0, pos).match(/@(\w*)$/);
+    close();
+    if (!m) return;
+    const q = m[1].toLowerCase();
+    const matches = people.filter(u => u.name.toLowerCase().includes(q)).slice(0, 6);
+    if (!matches.length) return;
+    box = document.createElement('div'); box.className = 'mention-box';
+    box.innerHTML = matches.map((u, i) => `<div class="mention-opt ${i === 0 ? 'sel' : ''}" data-h="${esc(u.name.split(' ')[0].toLowerCase())}">${esc(u.avatar)} ${esc(u.name)}</div>`).join('');
+    input.parentNode.style.position = 'relative';
+    input.parentNode.appendChild(box);
+    box.querySelectorAll('.mention-opt').forEach(o => o.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      input.value = v.slice(0, pos).replace(/@(\w*)$/, '@' + o.dataset.h + ' ') + v.slice(pos);
+      close(); input.focus();
+    }));
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
 boot();
+initShortcuts();

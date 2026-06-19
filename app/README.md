@@ -47,6 +47,20 @@ under `/api/pm`), schema in `db.js`.
 - **Rules / automation** — "when *trigger* → do *action*" (auto-assign, move section, set priority, add comment/collaborator).
 - **Forms** — intake forms that turn submissions into tasks.
 - **Global search** across tasks and projects.
+
+### Advanced (Asana-parity) features
+- **Drag-and-drop** — move cards between sections *and* reorder within a section (position persisted).
+- **Bulk actions** — multi-select tasks in List view to set assignee/priority/due date, complete, or delete in one shot.
+- **Keyboard shortcuts** — `?` help, `/` search, `c` create, and `g`-then-key navigation; `Esc` closes dialogs.
+- **@mention autocomplete** — a people picker appears as you type `@` in comments.
+- **Rich custom fields** — text, number, date, **people**, dropdown, and **multi-select** types.
+- **Flexible recurrence** — daily, every-weekday, weekly (with specific weekdays), monthly, yearly, each with an "every N" interval.
+- **Approval tasks** — an approval task type with Approve / Request-changes / Reject decisions.
+- **Proofing** — drop pin annotations with comments directly on image attachments, and resolve them.
+- **Org-wide calendar** — a personal month calendar across all projects in *My Tasks*.
+- **Timeline dependencies** — dependency arrows drawn between bars on the timeline.
+- **Guests & permissions** — invite guest accounts with project-only access, and set members to *edit* or *comment-only*.
+
 - **Auth & security** — bcrypt password hashing, JWT sessions, role-based access control on every endpoint.
 
 ## Tech stack

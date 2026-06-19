@@ -190,7 +190,7 @@ app.post('/api/members', auth, requireRole('org_admin'), (req, res) => {
   const count = db.prepare('SELECT COUNT(*) c FROM users WHERE org_id = ?').get(req.user.org_id).c;
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
   if (count >= org.seats) return bad(res, `Seat limit reached (${org.seats}). Upgrade your plan.`);
-  const newRole = role === 'org_admin' ? 'org_admin' : 'employee';
+  const newRole = ['org_admin', 'guest'].includes(role) ? role : 'employee';
   const r = db
     .prepare(
       'INSERT INTO users (org_id, email, password_hash, name, role, title, avatar) VALUES (?,?,?,?,?,?,?)'
@@ -210,7 +210,7 @@ app.patch('/api/members/:id', auth, requireRole('org_admin'), (req, res) => {
     title != null ? title : m.title,
     avatar || m.avatar,
     status || m.status,
-    role && (role === 'org_admin' || role === 'employee') ? role : m.role,
+    role && ['org_admin', 'employee', 'guest'].includes(role) ? role : m.role,
     m.id
   );
   if (password) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(password), m.id);

@@ -367,12 +367,39 @@ function initPM() {
   `);
 
   // ---- additive migrations (safe to run repeatedly) ----
-  const cols = db.prepare("PRAGMA table_info(attachments)").all().map((c) => c.name);
-  const addCol = (name, def) => { if (!cols.includes(name)) db.exec(`ALTER TABLE attachments ADD COLUMN ${name} ${def}`); };
-  addCol('kind', "TEXT NOT NULL DEFAULT 'link'");   // link | file
-  addCol('path', "TEXT DEFAULT ''");                 // stored file path (for kind=file)
-  addCol('size', 'INTEGER DEFAULT 0');
-  addCol('mime', "TEXT DEFAULT ''");
+  const colCache = {};
+  const hasCol = (table, name) => {
+    if (!colCache[table]) colCache[table] = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    return colCache[table].includes(name);
+  };
+  const addCol = (table, name, def) => { if (!hasCol(table, name)) { db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`); colCache[table].push(name); } };
+
+  addCol('attachments', 'kind', "TEXT NOT NULL DEFAULT 'link'");   // link | file
+  addCol('attachments', 'path', "TEXT DEFAULT ''");                 // stored file path (for kind=file)
+  addCol('attachments', 'size', 'INTEGER DEFAULT 0');
+  addCol('attachments', 'mime', "TEXT DEFAULT ''");
+
+  // advanced task features
+  addCol('pm_tasks', 'task_type', "TEXT NOT NULL DEFAULT 'task'");   // task | approval
+  addCol('pm_tasks', 'approval_status', "TEXT DEFAULT ''");           // '' | pending | approved | changes | rejected
+  addCol('pm_tasks', 'recur_interval', 'INTEGER NOT NULL DEFAULT 1'); // every N units
+  addCol('pm_tasks', 'recur_weekdays', "TEXT DEFAULT ''");            // CSV of 0-6 for weekly-by-weekday
+
+  // finer project permissions (editor | commenter)
+  addCol('project_members', 'access', "TEXT NOT NULL DEFAULT 'editor'");
+
+  // proofing annotations on image attachments
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS annotations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    attachment_id INTEGER NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    x             REAL NOT NULL DEFAULT 0,
+    y             REAL NOT NULL DEFAULT 0,
+    body          TEXT NOT NULL DEFAULT '',
+    resolved      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );`);
 }
 
 init();

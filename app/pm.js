@@ -68,6 +68,8 @@ function addFollower(taskId, userId) {
 function canAccessProject(user, project) {
   if (!project || project.org_id !== user.org_id) return false;
   if (user.role === 'org_admin') return true;
+  // guests only ever see projects they are explicitly a member of
+  if (user.role === 'guest') return !!db.prepare('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?').get(project.id, user.id);
   if (project.privacy !== 'private') return true;
   return !!db.prepare('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?').get(project.id, user.id);
 }
@@ -85,7 +87,8 @@ function enrichTask(t, userId) {
     deps: db.prepare('SELECT COUNT(*) c FROM task_dependencies WHERE task_id=?').get(t.id).c,
   };
   const liked = userId ? !!db.prepare("SELECT 1 FROM pm_likes WHERE target_type='task' AND target_id=? AND user_id=?").get(t.id, userId) : false;
-  return { ...t, assignee: a, tags, counts, liked };
+  const blocked_by = db.prepare('SELECT blocked_by FROM task_dependencies WHERE task_id=?').all(t.id).map((r) => r.blocked_by);
+  return { ...t, assignee: a, tags, counts, liked, blocked_by };
 }
 
 // rules engine — run when a trigger fires on a task
@@ -113,13 +116,33 @@ function runRules(project_id, trigger, task, actor) {
   }
 }
 
-function shiftDate(dateStr, recurrence) {
+// Compute the next occurrence date for a recurring task.
+// Supports interval ("every N"), weekday lists for weekly, and weekdays-only.
+function shiftDate(dateStr, recurrence, interval = 1, weekdays = '') {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00');
-  if (recurrence === 'daily') d.setDate(d.getDate() + 1);
-  else if (recurrence === 'weekly') d.setDate(d.getDate() + 7);
-  else if (recurrence === 'monthly') d.setMonth(d.getMonth() + 1);
+  const n = Math.max(1, Number(interval) || 1);
+  const days = (weekdays || '').split(',').map((x) => parseInt(x, 10)).filter((x) => !isNaN(x)).sort((a, b) => a - b);
+  if (recurrence === 'daily') d.setDate(d.getDate() + n);
+  else if (recurrence === 'weekdays') { do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6); }
+  else if (recurrence === 'weekly' && days.length) {
+    // next selected weekday; if none later this week, jump n weeks to the first selected day
+    let cur = d.getDay(), next = days.find((x) => x > cur);
+    if (next != null) d.setDate(d.getDate() + (next - cur));
+    else d.setDate(d.getDate() + (7 * n - cur + days[0]));
+  } else if (recurrence === 'weekly') d.setDate(d.getDate() + 7 * n);
+  else if (recurrence === 'monthly') d.setMonth(d.getMonth() + n);
+  else if (recurrence === 'yearly') d.setFullYear(d.getFullYear() + n);
   return d.toISOString().slice(0, 10);
+}
+
+// can the user edit (vs. comment-only) in a project?
+function canEditProject(user, project) {
+  if (!canAccessProject(user, project)) return false;
+  if (user.role === 'org_admin') return true;
+  if (project.owner_id === user.id) return true;
+  const m = db.prepare('SELECT access FROM project_members WHERE project_id=? AND user_id=?').get(project.id, user.id);
+  return !m || m.access !== 'commenter'; // non-members fall back to editor for team/public projects
 }
 
 // award gamification points the first time a task is completed
@@ -235,7 +258,7 @@ module.exports = function registerPM(app) {
     const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
     if (!canAccessProject(req.user, p)) return bad(res, 'Project not found', 404);
     const members = db.prepare(
-      'SELECT u.id,u.name,u.avatar,u.title FROM project_members pm JOIN users u ON u.id=pm.user_id WHERE pm.project_id=?'
+      'SELECT u.id,u.name,u.avatar,u.title,u.role,pm.access FROM project_members pm JOIN users u ON u.id=pm.user_id WHERE pm.project_id=?'
     ).all(p.id);
     ok(res, {
       ...projectSummary(p, req.user.id),
@@ -246,7 +269,7 @@ module.exports = function registerPM(app) {
       rules: db.prepare('SELECT * FROM rules WHERE project_id=? ORDER BY id').all(p.id),
       status_updates: db.prepare('SELECT s.*, u.name AS author, u.avatar FROM status_updates s LEFT JOIN users u ON u.id=s.user_id WHERE s.project_id=? ORDER BY s.created_at DESC LIMIT 20').all(p.id),
       form: { enabled: !!p.form_enabled, title: p.form_title, fields: JSON.parse(p.form_fields || '[]') },
-      can_edit: isAdmin(req) || p.owner_id === req.user.id,
+      can_edit: canEditProject(req.user, p),
     });
   });
 
@@ -286,8 +309,16 @@ module.exports = function registerPM(app) {
     if (!canAccessProject(req.user, p)) return bad(res, 'Project not found', 404);
     const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.body?.user_id);
     if (!u || u.org_id !== req.user.org_id) return bad(res, 'User not found');
-    db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id) VALUES (?,?)').run(p.id, u.id);
+    const access = req.body?.access === 'commenter' ? 'commenter' : 'editor';
+    db.prepare('INSERT INTO project_members (project_id, user_id, access) VALUES (?,?,?) ON CONFLICT(project_id, user_id) DO UPDATE SET access=excluded.access').run(p.id, u.id, access);
     ok(res, { added: true });
+  });
+  app.patch('/api/pm/projects/:id/members/:uid', A, (req, res) => {
+    const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
+    if (!canAccessProject(req.user, p)) return bad(res, 'Project not found', 404);
+    const access = req.body?.access === 'commenter' ? 'commenter' : 'editor';
+    db.prepare('INSERT INTO project_members (project_id, user_id, access) VALUES (?,?,?) ON CONFLICT(project_id, user_id) DO UPDATE SET access=excluded.access').run(p.id, req.params.uid, access);
+    ok(res, { updated: true, access });
   });
   app.delete('/api/pm/projects/:id/members/:uid', A, (req, res) => {
     const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
@@ -360,14 +391,18 @@ module.exports = function registerPM(app) {
     let parent = null;
     if (b.parent_id) { parent = getTaskScoped(req, b.parent_id); if (!parent) return bad(res, 'Parent task not found', 404); }
     if (!b.name) return bad(res, 'Task name required');
+    if (project && !canEditProject(req.user, project)) return bad(res, 'You have comment-only access to this project', 403);
     const priority = ['none', 'low', 'medium', 'high'].includes(b.priority) ? b.priority : 'none';
+    const recurrence = ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'].includes(b.recurrence) ? b.recurrence : 'none';
+    const taskType = b.task_type === 'approval' ? 'approval' : 'task';
     const pos = db.prepare('SELECT COALESCE(MAX(position),-1)+1 n FROM pm_tasks WHERE project_id IS ? AND section_id IS ?').get(project ? project.id : null, b.section_id || null).n;
     const r = db.prepare(
-      `INSERT INTO pm_tasks (org_id, project_id, section_id, parent_id, name, notes, assignee_id, created_by, start_date, due_date, priority, is_milestone, recurrence, points, position)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO pm_tasks (org_id, project_id, section_id, parent_id, name, notes, assignee_id, created_by, start_date, due_date, priority, is_milestone, recurrence, recur_interval, recur_weekdays, task_type, approval_status, points, position)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(req.user.org_id, project ? project.id : null, b.section_id || null, b.parent_id || null, b.name.trim(), b.notes || '',
       b.assignee_id || null, req.user.id, b.start_date || null, b.due_date || null, priority, b.is_milestone ? 1 : 0,
-      ['daily', 'weekly', 'monthly'].includes(b.recurrence) ? b.recurrence : 'none', PRIORITY_POINTS[priority], pos);
+      recurrence, Math.max(1, Number(b.recur_interval) || 1), b.recur_weekdays || '', taskType, taskType === 'approval' ? 'pending' : '',
+      PRIORITY_POINTS[priority], pos);
     const task = db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(r.lastInsertRowid);
     addFollower(task.id, req.user.id);
     addFollower(task.id, task.assignee_id);
@@ -406,6 +441,10 @@ module.exports = function registerPM(app) {
     const t = getTaskScoped(req, req.params.id);
     if (!t) return bad(res, 'Task not found', 404);
     const b = req.body || {};
+    if (t.project_id) {
+      const proj = db.prepare('SELECT * FROM projects WHERE id=?').get(t.project_id);
+      if (proj && !canEditProject(req.user, proj)) return bad(res, 'You have comment-only access to this project', 403);
+    }
     const before = { ...t };
     const priority = b.priority && ['none', 'low', 'medium', 'high'].includes(b.priority) ? b.priority : t.priority;
     const completed = b.completed != null ? (b.completed ? 1 : 0) : t.completed;
@@ -416,7 +455,7 @@ module.exports = function registerPM(app) {
       if (openBlockers > 0) return bad(res, 'This task is blocked by unfinished dependencies');
     }
     db.prepare(
-      `UPDATE pm_tasks SET name=?, notes=?, assignee_id=?, section_id=?, start_date=?, due_date=?, priority=?, is_milestone=?, recurrence=?, completed=?, completed_at=?, points=? WHERE id=?`
+      `UPDATE pm_tasks SET name=?, notes=?, assignee_id=?, section_id=?, start_date=?, due_date=?, priority=?, is_milestone=?, recurrence=?, recur_interval=?, recur_weekdays=?, completed=?, completed_at=?, points=? WHERE id=?`
     ).run(
       b.name != null ? b.name : t.name,
       b.notes != null ? b.notes : t.notes,
@@ -426,12 +465,17 @@ module.exports = function registerPM(app) {
       b.due_date !== undefined ? (b.due_date || null) : t.due_date,
       priority,
       b.is_milestone != null ? (b.is_milestone ? 1 : 0) : t.is_milestone,
-      b.recurrence && ['none', 'daily', 'weekly', 'monthly'].includes(b.recurrence) ? b.recurrence : t.recurrence,
+      b.recurrence && ['none', 'daily', 'weekdays', 'weekly', 'monthly', 'yearly'].includes(b.recurrence) ? b.recurrence : t.recurrence,
+      b.recur_interval != null ? Math.max(1, Number(b.recur_interval) || 1) : t.recur_interval,
+      b.recur_weekdays != null ? b.recur_weekdays : t.recur_weekdays,
       completed,
       completed && !t.completed ? new Date().toISOString() : (completed ? t.completed_at : null),
       priority !== t.priority ? PRIORITY_POINTS[priority] : t.points,
       t.id
     );
+    if (b.task_type === 'approval' || b.task_type === 'task') {
+      db.prepare('UPDATE pm_tasks SET task_type=?, approval_status=? WHERE id=?').run(b.task_type, b.task_type === 'approval' ? (t.approval_status || 'pending') : '', t.id);
+    }
     let task = db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(t.id);
 
     // assignment change
@@ -452,11 +496,11 @@ module.exports = function registerPM(app) {
       if (task.project_id) runRules(task.project_id, 'completed', task, req.user.id);
       // recurrence: spawn next occurrence
       if (task.recurrence !== 'none') {
-        const nd = shiftDate(task.due_date || new Date().toISOString().slice(0, 10), task.recurrence);
-        const sd = task.start_date ? shiftDate(task.start_date, task.recurrence) : null;
+        const nd = shiftDate(task.due_date || new Date().toISOString().slice(0, 10), task.recurrence, task.recur_interval, task.recur_weekdays);
+        const sd = task.start_date ? shiftDate(task.start_date, task.recurrence, task.recur_interval, task.recur_weekdays) : null;
         const np = db.prepare('SELECT COALESCE(MAX(position),-1)+1 n FROM pm_tasks WHERE project_id IS ? AND section_id IS ?').get(task.project_id, task.section_id).n;
-        db.prepare(`INSERT INTO pm_tasks (org_id, project_id, section_id, parent_id, name, notes, assignee_id, created_by, start_date, due_date, priority, is_milestone, recurrence, points, position) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-          .run(task.org_id, task.project_id, task.section_id, null, task.name, task.notes, task.assignee_id, req.user.id, sd, nd, task.priority, task.is_milestone, task.recurrence, task.points, np);
+        db.prepare(`INSERT INTO pm_tasks (org_id, project_id, section_id, parent_id, name, notes, assignee_id, created_by, start_date, due_date, priority, is_milestone, recurrence, recur_interval, recur_weekdays, task_type, points, position) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(task.org_id, task.project_id, task.section_id, null, task.name, task.notes, task.assignee_id, req.user.id, sd, nd, task.priority, task.is_milestone, task.recurrence, task.recur_interval, task.recur_weekdays, task.task_type, task.points, np);
       }
     } else if (!completed && before.completed) {
       logActivity(task.id, req.user.id, 'reopened', task.name);
@@ -705,7 +749,8 @@ module.exports = function registerPM(app) {
     const { name, type, options } = req.body || {};
     if (!name) return bad(res, 'Field name required');
     const pos = db.prepare('SELECT COALESCE(MAX(position),-1)+1 n FROM custom_fields WHERE project_id=?').get(p.id).n;
-    const r = db.prepare('INSERT INTO custom_fields (project_id, name, type, options, position) VALUES (?,?,?,?,?)').run(p.id, name.trim(), ['text', 'number', 'dropdown'].includes(type) ? type : 'text', JSON.stringify(options || []), pos);
+    const ftype = ['text', 'number', 'dropdown', 'date', 'people', 'multi_select'].includes(type) ? type : 'text';
+    const r = db.prepare('INSERT INTO custom_fields (project_id, name, type, options, position) VALUES (?,?,?,?,?)').run(p.id, name.trim(), ftype, JSON.stringify(options || []), pos);
     ok(res, db.prepare('SELECT * FROM custom_fields WHERE id=?').get(r.lastInsertRowid));
   });
   app.delete('/api/pm/fields/:id', A, (req, res) => {
@@ -864,5 +909,99 @@ module.exports = function registerPM(app) {
   });
 
   // org members helper for pickers
-  app.get('/api/pm/people', A, (req, res) => ok(res, db.prepare("SELECT id,name,avatar,title FROM users WHERE org_id=? AND role IN ('employee','org_admin') ORDER BY name").all(req.user.org_id).map((u) => u)));
+  app.get('/api/pm/people', A, (req, res) => ok(res, db.prepare("SELECT id,name,avatar,title,role FROM users WHERE org_id=? AND role IN ('employee','org_admin','guest') ORDER BY name").all(req.user.org_id).map((u) => u)));
+
+  // ========================= REORDER (within a section) =========================
+  app.post('/api/pm/projects/:id/reorder', A, (req, res) => {
+    const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
+    if (!canAccessProject(req.user, p) || !canEditProject(req.user, p)) return bad(res, 'Forbidden', 403);
+    const ids = Array.isArray(req.body?.ordered_ids) ? req.body.ordered_ids : [];
+    const reorder = db.transaction((list) => {
+      list.forEach((tid, i) => {
+        const t = db.prepare('SELECT id, project_id, org_id FROM pm_tasks WHERE id=?').get(tid);
+        if (!t || t.org_id !== req.user.org_id) return;
+        if (t.project_id === p.id) db.prepare('UPDATE pm_tasks SET position=? WHERE id=?').run(i, tid);
+        else db.prepare('UPDATE task_projects SET section_id=section_id WHERE task_id=? AND project_id=?').run(tid, p.id); // multi-homed: position not tracked, keep section
+      });
+    });
+    reorder(ids);
+    ok(res, { reordered: true });
+  });
+
+  // ========================= BULK ACTIONS =========================
+  app.post('/api/pm/tasks/bulk', A, (req, res) => {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number);
+    const patch = req.body?.patch || {};
+    const del = !!req.body?.delete;
+    if (!ids.length) return bad(res, 'No tasks selected');
+    let affected = 0;
+    const run = db.transaction(() => {
+      for (const id of ids) {
+        const t = db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(id);
+        if (!t || t.org_id !== req.user.org_id) continue;
+        if (t.project_id) { const proj = db.prepare('SELECT * FROM projects WHERE id=?').get(t.project_id); if (proj && !canEditProject(req.user, proj)) continue; }
+        if (del) { db.prepare('DELETE FROM pm_tasks WHERE id=?').run(id); affected++; continue; }
+        if (patch.assignee_id !== undefined) { db.prepare('UPDATE pm_tasks SET assignee_id=? WHERE id=?').run(patch.assignee_id || null, id); addFollower(id, patch.assignee_id); }
+        if (patch.priority && ['none', 'low', 'medium', 'high'].includes(patch.priority)) db.prepare('UPDATE pm_tasks SET priority=?, points=? WHERE id=?').run(patch.priority, PRIORITY_POINTS[patch.priority], id);
+        if (patch.section_id !== undefined) db.prepare('UPDATE pm_tasks SET section_id=? WHERE id=?').run(patch.section_id || null, id);
+        if (patch.due_date !== undefined) db.prepare('UPDATE pm_tasks SET due_date=? WHERE id=?').run(patch.due_date || null, id);
+        if (patch.completed !== undefined) {
+          const done = patch.completed ? 1 : 0;
+          if (done && !t.completed) {
+            const openBlockers = db.prepare('SELECT COUNT(*) c FROM task_dependencies d JOIN pm_tasks x ON x.id=d.blocked_by WHERE d.task_id=? AND x.completed=0').get(id).c;
+            if (openBlockers > 0) continue;
+            db.prepare("UPDATE pm_tasks SET completed=1, completed_at=? WHERE id=?").run(new Date().toISOString(), id);
+            maybeAward(db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(id), req.user.id);
+          } else db.prepare('UPDATE pm_tasks SET completed=?, completed_at=NULL WHERE id=?').run(done, id);
+        }
+        if (patch.add_tag) db.prepare('INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?,?)').run(id, patch.add_tag);
+        affected++;
+      }
+    });
+    run();
+    ok(res, { affected });
+  });
+
+  // ========================= APPROVAL TASKS =========================
+  app.post('/api/pm/tasks/:id/approval', A, (req, res) => {
+    const t = getTaskScoped(req, req.params.id);
+    if (!t) return bad(res, 'Task not found', 404);
+    const decision = req.body?.decision; // approved | changes | rejected | pending
+    if (!['approved', 'changes', 'rejected', 'pending'].includes(decision)) return bad(res, 'Invalid decision');
+    const completed = decision === 'approved' || decision === 'rejected' ? 1 : 0;
+    db.prepare('UPDATE pm_tasks SET task_type=?, approval_status=?, completed=?, completed_at=? WHERE id=?')
+      .run('approval', decision, completed, completed ? new Date().toISOString() : null, t.id);
+    logActivity(t.id, req.user.id, 'approval', decision);
+    if (decision === 'approved' && !t.completed) maybeAward(db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(t.id), req.user.id);
+    followersOf(t.id).forEach((uid) => notify({ org_id: t.org_id, user_id: uid, actor_id: req.user.id, type: 'approval', task_id: t.id, project_id: t.project_id, text: `marked "${t.name}" as ${decision}` }));
+    ok(res, enrichTask(db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(t.id), req.user.id));
+  });
+
+  // ========================= PROOFING ANNOTATIONS =========================
+  app.get('/api/pm/attachments/:id/annotations', A, (req, res) => {
+    const a = db.prepare('SELECT a.*, x.org_id FROM attachments a JOIN pm_tasks x ON x.id=a.task_id WHERE a.id=?').get(req.params.id);
+    if (!a || a.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    ok(res, db.prepare('SELECT an.*, u.name AS author, u.avatar FROM annotations an LEFT JOIN users u ON u.id=an.user_id WHERE an.attachment_id=? ORDER BY an.created_at').all(a.id));
+  });
+  app.post('/api/pm/attachments/:id/annotations', A, (req, res) => {
+    const a = db.prepare('SELECT a.*, x.org_id FROM attachments a JOIN pm_tasks x ON x.id=a.task_id WHERE a.id=?').get(req.params.id);
+    if (!a || a.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    const { x, y, body } = req.body || {};
+    if (!body) return bad(res, 'Comment required');
+    const r = db.prepare('INSERT INTO annotations (attachment_id, user_id, x, y, body) VALUES (?,?,?,?,?)').run(a.id, req.user.id, Number(x) || 0, Number(y) || 0, body.trim());
+    logActivity(a.task_id, req.user.id, 'comment', 'proofing note');
+    ok(res, db.prepare('SELECT an.*, u.name AS author, u.avatar FROM annotations an LEFT JOIN users u ON u.id=an.user_id WHERE an.id=?').get(r.lastInsertRowid));
+  });
+  app.patch('/api/pm/annotations/:id', A, (req, res) => {
+    const an = db.prepare('SELECT an.*, x.org_id FROM annotations an JOIN attachments at ON at.id=an.attachment_id JOIN pm_tasks x ON x.id=at.task_id WHERE an.id=?').get(req.params.id);
+    if (!an || an.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    db.prepare('UPDATE annotations SET resolved=? WHERE id=?').run(req.body?.resolved ? 1 : 0, an.id);
+    ok(res, { updated: true });
+  });
+  app.delete('/api/pm/annotations/:id', A, (req, res) => {
+    const an = db.prepare('SELECT an.*, x.org_id FROM annotations an JOIN attachments at ON at.id=an.attachment_id JOIN pm_tasks x ON x.id=at.task_id WHERE an.id=?').get(req.params.id);
+    if (!an || an.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    db.prepare('DELETE FROM annotations WHERE id=?').run(an.id);
+    ok(res, { deleted: true });
+  });
 };
