@@ -1146,7 +1146,7 @@ function boardCol(sid, name, tasks) {
   </div>`;
 }
 function taskCardPM(t) {
-  return `<div class="task-card ${t.completed ? 'done' : ''}" data-task="${t.id}">
+  return `<div class="task-card ${t.completed ? 'done' : ''}" data-task="${t.id}" draggable="true">
     <div class="row" style="align-items:flex-start;gap:8px">
       <button class="check ${t.completed ? 'on' : ''}" data-check="${t.id}">${t.completed ? '✓' : ''}</button>
       <div class="grow">
@@ -1163,10 +1163,28 @@ function taskCardPM(t) {
     </div>
   </div>`;
 }
+let _dragId = null;
 function bindBoard() {
   document.querySelectorAll('[data-task]').forEach(c => c.addEventListener('click', (e) => { if (e.target.closest('[data-check]')) return; openTask(c.dataset.task); }));
   document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); toggleComplete(b.dataset.check, e); }));
   document.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => quickAddTask(b.dataset.quick || null)));
+  // drag and drop between sections
+  document.querySelectorAll('.task-card[draggable]').forEach(c => {
+    c.addEventListener('dragstart', () => { _dragId = c.dataset.task; c.classList.add('dragging'); });
+    c.addEventListener('dragend', () => { _dragId = null; c.classList.remove('dragging'); document.querySelectorAll('.board-col').forEach(x => x.classList.remove('drag-over')); });
+  });
+  document.querySelectorAll('.board-col').forEach(col => {
+    col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault(); col.classList.remove('drag-over');
+      if (!_dragId) return;
+      const t = findTask(_dragId); const newSec = col.dataset.sec ? Number(col.dataset.sec) : null;
+      if (!t || (t.section_id || null) === newSec) return;
+      try { FX.sound('click'); await api('/pm/tasks/' + _dragId, { method: 'PATCH', body: { section_id: newSec } }); reloadProject(); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+  });
 }
 async function toggleComplete(id, ev) {
   const t = findTask(id); if (!t) return;
