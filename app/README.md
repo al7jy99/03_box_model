@@ -35,9 +35,10 @@ under `/api/pm`), schema in `db.js`.
 - **Sections** — group tasks within a project.
 - **Tasks** — assignee, start/due dates, priority, notes, milestones, tags, recurrence (daily/weekly/monthly).
 - **Subtasks**, **dependencies** (a task can't complete while blockers are open), **collaborators/followers**.
+- **Multi-homing** — a task can live in several projects at once, with its own section in each, while keeping one home project.
 - **Comments** with **@mentions** (drive notifications) and **likes/hearts** on tasks and comments.
 - **Custom fields** (text / number / dropdown) per project.
-- **Tags**, **attachments** (links), and a per-task **activity log**.
+- **Tags**, **attachments** (both link attachments and real **file uploads** up to 15 MB, stored on disk and served through an authenticated download endpoint), and a per-task **activity log**.
 - **My Tasks** — your work across all projects, bucketed by Overdue / Today / Next 7 days / Later / No date / Completed.
 - **Inbox** — notifications for assignments, mentions, comments, completions, status updates (with unread badge).
 - **Goals** — objectives with progress, status, owner and linked projects.

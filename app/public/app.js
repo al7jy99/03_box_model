@@ -1151,6 +1151,7 @@ function taskCardPM(t) {
       <button class="check ${t.completed ? 'on' : ''}" data-check="${t.id}">${t.completed ? '✓' : ''}</button>
       <div class="grow">
         ${t.is_milestone ? '<span class="milestone">◆ Milestone</span>' : ''}
+        ${t.multihomed_here ? '<span class="multihome-tag" title="Lives in another project too">↗ multi-homed</span>' : ''}
         <div class="tname">${esc(t.name)}</div>
         ${t.tags && t.tags.length ? `<div class="tag-row">${tagChips(t.tags)}</div>` : ''}
         <div class="task-meta">${prioPill(t.priority)}${dueChip(t.due_date, t.completed)}
@@ -1181,8 +1182,13 @@ function bindBoard() {
       if (!_dragId) return;
       const t = findTask(_dragId); const newSec = col.dataset.sec ? Number(col.dataset.sec) : null;
       if (!t || (t.section_id || null) === newSec) return;
-      try { FX.sound('click'); await api('/pm/tasks/' + _dragId, { method: 'PATCH', body: { section_id: newSec } }); reloadProject(); }
-      catch (err) { toast(err.message, 'error'); }
+      try {
+        FX.sound('click');
+        // multi-homed cards move within their membership for THIS project; primary cards move their home section
+        if (t.multihomed_here) await api('/pm/tasks/' + _dragId + '/projects/' + pmState.projectId, { method: 'PATCH', body: { section_id: newSec } });
+        else await api('/pm/tasks/' + _dragId, { method: 'PATCH', body: { section_id: newSec } });
+        reloadProject();
+      } catch (err) { toast(err.message, 'error'); }
     });
   });
 }
@@ -1365,9 +1371,18 @@ function renderDrawer(t) {
       <button class="btn ghost sm" id="dAddDep" style="margin-top:6px">+ Add dependency</button>
     </div>
 
+    <div class="d-section"><b>Projects</b>
+      <div id="dHomes">${(t.homes || []).map(h => `<div class="sub-row"><span class="proj-pill" style="--c:${h.color}">${h.icon} ${esc(h.name)}</span>${h.is_primary ? '<span class="sub">home</span>' : `<button class="icon-btn sm" data-unhome="${h.id}">✕</button>`}</div>`).join('')}</div>
+      <button class="btn ghost sm" id="dAddHome" style="margin-top:6px">+ Add to project</button>
+    </div>
+
     <div class="d-section"><b>Attachments</b>
-      <div id="dAtt">${t.attachments.map(a => `<div class="sub-row">📎 ${a.url ? `<a href="${esc(a.url)}" target="_blank">${esc(a.name)}</a>` : esc(a.name)}<button class="icon-btn sm" data-unatt="${a.id}">✕</button></div>`).join('') || '<span class="sub">None</span>'}</div>
-      <button class="btn ghost sm" id="dAddAtt" style="margin-top:6px">+ Add link</button>
+      <div id="dAtt">${t.attachments.map(a => attachRow(a)).join('') || '<span class="sub">None</span>'}</div>
+      <div class="row" style="margin-top:8px;gap:8px">
+        <button class="btn ghost sm" id="dAddAtt">🔗 Add link</button>
+        <button class="btn ghost sm" id="dUploadBtn">📤 Upload file</button>
+        <input type="file" id="dFileInput" style="display:none" />
+      </div>
     </div>
 
     <div class="d-section"><b>Collaborators</b>
@@ -1384,7 +1399,24 @@ function renderDrawer(t) {
     </div>`;
   bindDrawer(t);
 }
-function actText(a) { return ({ created: 'created this task', completed: 'completed this task', reopened: 'reopened this task', assigned: 'changed assignee', comment: 'commented', subtask: 'added a subtask', dependency: 'added a dependency', attachment: 'added an attachment', rule: a.detail || 'automation ran' }[a.type] || a.type); }
+function actText(a) { return ({ created: 'created this task', completed: 'completed this task', reopened: 'reopened this task', assigned: 'changed assignee', comment: 'commented', subtask: 'added a subtask', dependency: 'added a dependency', attachment: 'added an attachment', multihome: 'added this to another project', rule: a.detail || 'automation ran' }[a.type] || a.type); }
+function fmtSize(n) { if (!n) return ''; return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+function attachRow(a) {
+  const label = a.kind === 'file'
+    ? `<a href="#" data-dl="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</a> <span class="sub">${fmtSize(a.size)}</span>`
+    : (a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>` : esc(a.name));
+  return `<div class="sub-row">${a.kind === 'file' ? '📄' : '🔗'} ${label}<button class="icon-btn sm" data-unatt="${a.id}">✕</button></div>`;
+}
+async function downloadAttachment(id, name) {
+  try {
+    const res = await fetch('/api/pm/attachments/' + id + '/download', { headers: { Authorization: 'Bearer ' + state.token } });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name || 'download';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } catch (e) { toast(e.message, 'error'); }
+}
 function commentHtml(c) {
   return `<div class="comment"><div class="pm-av" style="width:30px;height:30px">${esc(c.avatar || '🙂')}</div>
     <div class="grow"><div class="row spread"><b>${esc(c.author || 'Someone')}</b><span class="sub">${fmtDate(c.created_at)}</span></div>
@@ -1421,9 +1453,23 @@ function bindDrawer(t) {
   // dependencies
   $('dAddDep').addEventListener('click', () => depModal(id));
   document.querySelectorAll('[data-undep]').forEach(b => b.addEventListener('click', async () => { await api('/pm/tasks/' + id + '/dependencies/' + b.dataset.undep, { method: 'DELETE' }); openTask(id); }));
-  // attachments
+  // attachments — links, file upload, download
   $('dAddAtt').addEventListener('click', async () => { const name = prompt('Attachment name'); if (!name) return; const url = prompt('Link URL (optional)') || ''; await api('/pm/tasks/' + id + '/attachments', { method: 'POST', body: { name, url } }); openTask(id); });
+  $('dUploadBtn').addEventListener('click', () => $('dFileInput').click());
+  $('dFileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const res = await fetch('/api/pm/tasks/' + id + '/attachments/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + state.token }, body: fd });
+      const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Upload failed');
+      FX.sound('whoosh'); toast('File uploaded 📄', 'success'); openTask(id);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  document.querySelectorAll('[data-dl]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); downloadAttachment(a.dataset.dl, a.dataset.name); }));
   document.querySelectorAll('[data-unatt]').forEach(b => b.addEventListener('click', async () => { await api('/pm/attachments/' + b.dataset.unatt, { method: 'DELETE' }); openTask(id); }));
+  // multi-homing
+  $('dAddHome').addEventListener('click', () => homeModal(id));
+  document.querySelectorAll('[data-unhome]').forEach(b => b.addEventListener('click', async () => { await api('/pm/tasks/' + id + '/projects/' + b.dataset.unhome, { method: 'DELETE' }); openTask(id); }));
   // followers add
   $('dAddFollow').addEventListener('click', () => followModal(id));
   // tags
@@ -1439,6 +1485,16 @@ function depModal(taskId) {
     <label>Blocked by</label><select id="depSel">${opts}</select>
     <div class="actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="depSave">Add</button></div>`);
   document.getElementById('depSave').addEventListener('click', async () => { await api('/pm/tasks/' + taskId + '/dependencies', { method: 'POST', body: { blocked_by: document.getElementById('depSel').value } }); closeModal(); openTask(taskId); });
+}
+async function homeModal(taskId) {
+  const projects = await api('/pm/projects');
+  modal(`<h2>Add to a project</h2><p class="muted">The task will appear on this project's board too, while keeping its home.</p>
+    <label>Project</label><select id="homeSel">${projects.map(p => `<option value="${p.id}">${p.icon} ${esc(p.name)}</option>`).join('')}</select>
+    <div class="actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="homeSave">Add</button></div>`);
+  document.getElementById('homeSave').addEventListener('click', async () => {
+    try { await api('/pm/tasks/' + taskId + '/projects', { method: 'POST', body: { project_id: Number(document.getElementById('homeSel').value) } }); closeModal(); toast('Added to project', 'success'); openTask(taskId); }
+    catch (e) { toast(e.message, 'error'); }
+  });
 }
 function followModal(taskId) {
   modal(`<h2>Add collaborator</h2><label>Person</label><select id="folSel">${pmState.people.map(u => `<option value="${u.id}">${esc(u.avatar)} ${esc(u.name)}</option>`).join('')}</select>

@@ -3,10 +3,28 @@
 // ============================================================
 // Project management (Asana-style) API — mounted under /api/pm
 // ============================================================
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { db, verifyToken, award, publicUser } = require('./lib');
 
 const ok = (res, data) => res.json(data);
 const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
+
+// ---- file uploads (attachments) ----
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(UPLOAD_DIR, String(req.user.org_id));
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 8) + path.extname(file.originalname).slice(0, 12)),
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+});
 
 // ---- auth middleware (self-contained, mirrors server.js) ----
 function auth(req, res, next) {
@@ -116,6 +134,18 @@ function getTaskScoped(req, id) {
   const t = db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(id);
   if (!t || t.org_id !== req.user.org_id) return null;
   return t;
+}
+
+// All projects a task lives in: its primary home plus any multi-homed memberships.
+function taskHomes(t) {
+  const homes = [];
+  if (t.project_id) {
+    const p = db.prepare('SELECT id,name,color,icon FROM projects WHERE id=?').get(t.project_id);
+    if (p) homes.push({ ...p, section_id: t.section_id, is_primary: true });
+  }
+  db.prepare('SELECT p.id,p.name,p.color,p.icon, tp.section_id FROM task_projects tp JOIN projects p ON p.id=tp.project_id WHERE tp.task_id=?').all(t.id)
+    .forEach((p) => homes.push({ ...p, is_primary: false }));
+  return homes;
 }
 
 module.exports = function registerPM(app) {
@@ -280,8 +310,18 @@ module.exports = function registerPM(app) {
   app.get('/api/pm/projects/:id/tasks', A, (req, res) => {
     const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
     if (!canAccessProject(req.user, p)) return bad(res, 'Project not found', 404);
-    const rows = db.prepare('SELECT * FROM pm_tasks WHERE project_id=? AND parent_id IS NULL ORDER BY position, id').all(p.id);
-    ok(res, rows.map((t) => enrichTask(t, req.user.id)));
+    // primary tasks of this project
+    const primary = db.prepare('SELECT * FROM pm_tasks WHERE project_id=? AND parent_id IS NULL ORDER BY position, id').all(p.id);
+    // multi-homed tasks (live primarily elsewhere but also placed in this project)
+    const homed = db.prepare(
+      `SELECT t.*, tp.section_id AS _home_section FROM task_projects tp JOIN pm_tasks t ON t.id=tp.task_id
+       WHERE tp.project_id=? AND t.parent_id IS NULL AND t.project_id != ?`
+    ).all(p.id, p.id);
+    const out = [
+      ...primary.map((t) => enrichTask(t, req.user.id)),
+      ...homed.map((t) => ({ ...enrichTask(t, req.user.id), section_id: t._home_section, multihomed_here: true })),
+    ];
+    ok(res, out);
   });
 
   // ========================= SECTIONS =========================
@@ -357,6 +397,7 @@ module.exports = function registerPM(app) {
       activity: db.prepare('SELECT a.*, u.name AS author, u.avatar FROM pm_activity a LEFT JOIN users u ON u.id=a.user_id WHERE a.task_id=? ORDER BY a.created_at DESC LIMIT 40').all(t.id),
       custom_values: db.prepare('SELECT field_id, value FROM custom_field_values WHERE task_id=?').all(t.id),
       custom_fields: project ? db.prepare('SELECT * FROM custom_fields WHERE project_id=? ORDER BY position,id').all(project.id).map((f) => ({ ...f, options: JSON.parse(f.options || '[]') })) : [],
+      homes: taskHomes(t),
     };
     ok(res, detail);
   });
@@ -472,6 +513,40 @@ module.exports = function registerPM(app) {
     ok(res, { removed: true });
   });
 
+  // ---- multi-homing: add/move/remove a task across projects ----
+  app.post('/api/pm/tasks/:id/projects', A, (req, res) => {
+    const t = getTaskScoped(req, req.params.id);
+    if (!t) return bad(res, 'Task not found', 404);
+    const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.body?.project_id);
+    if (!canAccessProject(req.user, p)) return bad(res, 'Project not found', 404);
+    if (p.id === t.project_id) return bad(res, 'Task already lives in that project');
+    let sectionId = req.body?.section_id || null;
+    if (!sectionId) { const s = db.prepare('SELECT id FROM sections WHERE project_id=? ORDER BY position LIMIT 1').get(p.id); sectionId = s ? s.id : null; }
+    db.prepare('INSERT OR IGNORE INTO task_projects (task_id, project_id, section_id) VALUES (?,?,?)').run(t.id, p.id, sectionId);
+    db.prepare('UPDATE task_projects SET section_id=? WHERE task_id=? AND project_id=?').run(sectionId, t.id, p.id);
+    logActivity(t.id, req.user.id, 'multihome', `added to ${p.name}`);
+    runRules(p.id, 'task_added', { ...t, section_id: sectionId }, req.user.id);
+    ok(res, { added: true, homes: taskHomes(db.prepare('SELECT * FROM pm_tasks WHERE id=?').get(t.id)) });
+  });
+  // update the section a multi-homed task sits in, for a given project
+  app.patch('/api/pm/tasks/:id/projects/:projectId', A, (req, res) => {
+    const t = getTaskScoped(req, req.params.id);
+    if (!t) return bad(res, 'Task not found', 404);
+    const pid = Number(req.params.projectId);
+    const sectionId = req.body?.section_id || null;
+    if (pid === t.project_id) { db.prepare('UPDATE pm_tasks SET section_id=? WHERE id=?').run(sectionId, t.id); }
+    else { db.prepare('UPDATE task_projects SET section_id=? WHERE task_id=? AND project_id=?').run(sectionId, t.id, pid); }
+    ok(res, { updated: true });
+  });
+  app.delete('/api/pm/tasks/:id/projects/:projectId', A, (req, res) => {
+    const t = getTaskScoped(req, req.params.id);
+    if (!t) return bad(res, 'Task not found', 404);
+    const pid = Number(req.params.projectId);
+    if (pid === t.project_id) return bad(res, "Can't remove a task from its primary project — delete the task or move its home instead");
+    db.prepare('DELETE FROM task_projects WHERE task_id=? AND project_id=?').run(t.id, pid);
+    ok(res, { removed: true });
+  });
+
   // tags
   app.post('/api/pm/tasks/:id/tags', A, (req, res) => {
     const t = getTaskScoped(req, req.params.id);
@@ -493,13 +568,36 @@ module.exports = function registerPM(app) {
     const t = getTaskScoped(req, req.params.id);
     if (!t) return bad(res, 'Task not found', 404);
     if (!req.body?.name) return bad(res, 'Attachment name required');
-    const r = db.prepare('INSERT INTO attachments (task_id, name, url) VALUES (?,?,?)').run(t.id, req.body.name.trim(), req.body.url || '');
+    const r = db.prepare("INSERT INTO attachments (task_id, name, url, kind) VALUES (?,?,?,'link')").run(t.id, req.body.name.trim(), req.body.url || '');
     logActivity(t.id, req.user.id, 'attachment', req.body.name);
     ok(res, db.prepare('SELECT * FROM attachments WHERE id=?').get(r.lastInsertRowid));
+  });
+  // attachments (real file upload)
+  app.post('/api/pm/tasks/:id/attachments/upload', A, upload.single('file'), (req, res) => {
+    const t = getTaskScoped(req, req.params.id);
+    if (!t) { if (req.file) fs.unlink(req.file.path, () => {}); return bad(res, 'Task not found', 404); }
+    if (!req.file) return bad(res, 'No file uploaded');
+    const r = db.prepare("INSERT INTO attachments (task_id, name, kind, path, size, mime) VALUES (?,?,'file',?,?,?)")
+      .run(t.id, req.file.originalname, req.file.path, req.file.size, req.file.mimetype || '');
+    logActivity(t.id, req.user.id, 'attachment', req.file.originalname);
+    ok(res, db.prepare('SELECT * FROM attachments WHERE id=?').get(r.lastInsertRowid));
+  });
+  // authenticated download (token can be passed as ?t= for direct links)
+  function attachAuth(req, res, next) {
+    if (!req.headers.authorization && req.query.t) req.headers.authorization = 'Bearer ' + req.query.t;
+    return auth(req, res, next);
+  }
+  app.get('/api/pm/attachments/:id/download', attachAuth, (req, res) => {
+    const a = db.prepare('SELECT a.*, x.org_id FROM attachments a JOIN pm_tasks x ON x.id=a.task_id WHERE a.id=?').get(req.params.id);
+    if (!a || a.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    if (a.kind === 'file' && a.path && fs.existsSync(a.path)) return res.download(a.path, a.name);
+    if (a.url) return res.redirect(a.url);
+    return bad(res, 'File unavailable', 404);
   });
   app.delete('/api/pm/attachments/:id', A, (req, res) => {
     const a = db.prepare('SELECT a.*, x.org_id FROM attachments a JOIN pm_tasks x ON x.id=a.task_id WHERE a.id=?').get(req.params.id);
     if (!a || a.org_id !== req.user.org_id) return bad(res, 'Not found', 404);
+    if (a.kind === 'file' && a.path) fs.unlink(a.path, () => {});
     db.prepare('DELETE FROM attachments WHERE id=?').run(a.id);
     ok(res, { deleted: true });
   });

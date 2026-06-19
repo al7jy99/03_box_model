@@ -11,10 +11,11 @@
     "test": "node test-ui.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "express": "^4.21.2"
+    "multer": "^2.2.0"
   },
   "devDependencies": {
     "jsdom": "^24.0.0"

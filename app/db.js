@@ -351,12 +351,28 @@ function initPM() {
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS task_projects (
+    task_id    INTEGER NOT NULL REFERENCES pm_tasks(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL,
+    UNIQUE(task_id, project_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_pmtasks_project ON pm_tasks(project_id);
   CREATE INDEX IF NOT EXISTS idx_pmtasks_assignee ON pm_tasks(assignee_id);
   CREATE INDEX IF NOT EXISTS idx_pmtasks_parent ON pm_tasks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_sections_project ON sections(project_id);
+  CREATE INDEX IF NOT EXISTS idx_taskprojects ON task_projects(project_id);
   `);
+
+  // ---- additive migrations (safe to run repeatedly) ----
+  const cols = db.prepare("PRAGMA table_info(attachments)").all().map((c) => c.name);
+  const addCol = (name, def) => { if (!cols.includes(name)) db.exec(`ALTER TABLE attachments ADD COLUMN ${name} ${def}`); };
+  addCol('kind', "TEXT NOT NULL DEFAULT 'link'");   // link | file
+  addCol('path', "TEXT DEFAULT ''");                 // stored file path (for kind=file)
+  addCol('size', 'INTEGER DEFAULT 0');
+  addCol('mime', "TEXT DEFAULT ''");
 }
 
 init();
