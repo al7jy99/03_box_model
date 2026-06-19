@@ -22,6 +22,30 @@ It ships with three fully working portals:
 - **Rewards & redemptions** — admins define a catalog (cost in stars, stock, icon). Employees redeem; stars are deducted immediately and refunded automatically if a request is rejected.
 - **Gamification** — points vs. spendable stars, levels with an XP curve, a live leaderboard, and computed achievement badges.
 - **Game-like experience** — a playful arcade UI with an animated starfield, rounded game fonts, chunky 3D buttons, glassmorphism, confetti bursts, floating "+XP" pops, full-screen level-up / reward celebrations, animated count-up stats, and optional sound effects (synthesized in the browser, with a mute toggle).
+
+## Work management (Asana-style)
+
+A full project-management layer is built in and integrates with the gamification
+(completing real work awards stars). Backend lives in `pm.js` (64 REST endpoints
+under `/api/pm`), schema in `db.js`.
+
+- **Teams** — group people; projects belong to a team.
+- **Projects** — color/icon, owner, members, privacy, archive, favorites, status, project templates (Kanban / Sprint / Editorial / Blank).
+- **Six project views** — **Overview**, **Board** (Kanban by section), **List**, **Calendar**, **Timeline** (Gantt-style bars), and **Dashboard** (charts).
+- **Sections** — group tasks within a project.
+- **Tasks** — assignee, start/due dates, priority, notes, milestones, tags, recurrence (daily/weekly/monthly).
+- **Subtasks**, **dependencies** (a task can't complete while blockers are open), **collaborators/followers**.
+- **Comments** with **@mentions** (drive notifications) and **likes/hearts** on tasks and comments.
+- **Custom fields** (text / number / dropdown) per project.
+- **Tags**, **attachments** (links), and a per-task **activity log**.
+- **My Tasks** — your work across all projects, bucketed by Overdue / Today / Next 7 days / Later / No date / Completed.
+- **Inbox** — notifications for assignments, mentions, comments, completions, status updates (with unread badge).
+- **Goals** — objectives with progress, status, owner and linked projects.
+- **Portfolios** — group projects with roll-up progress.
+- **Status updates** per project; **Workload** (capacity per person); **Reporting** dashboards (completion rate, by priority/project/assignee, 7-day trend).
+- **Rules / automation** — "when *trigger* → do *action*" (auto-assign, move section, set priority, add comment/collaborator).
+- **Forms** — intake forms that turn submissions into tasks.
+- **Global search** across tasks and projects.
 - **Auth & security** — bcrypt password hashing, JWT sessions, role-based access control on every endpoint.
 
 ## Tech stack

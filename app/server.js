@@ -675,6 +675,9 @@ app.get('/api/analytics', auth, requireRole('org_admin'), (req, res) => {
   });
 });
 
+// ---------- project-management (Asana-style) module ----------
+require('./pm')(app);
+
 // ---------- static frontend ----------
 app.use(express.static(path.join(__dirname, 'public')));
 // The single-page app lives under /app; everything else falls back to the

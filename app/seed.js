@@ -11,7 +11,14 @@ const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || 'super1234';
 function reset() {
   const tables = [
     'transactions', 'redemptions', 'rewards', 'idea_votes', 'ideas',
-    'challenge_participants', 'challenges', 'tasks', 'users', 'organizations',
+    'challenge_participants', 'challenges', 'tasks',
+    // project-management layer
+    'pm_activity', 'notifications', 'pm_likes', 'attachments', 'custom_field_values',
+    'custom_fields', 'pm_comments', 'task_dependencies', 'task_followers', 'task_tags',
+    'tags', 'pm_tasks', 'rules', 'status_updates', 'sections', 'project_members',
+    'goal_projects', 'goals', 'portfolio_projects', 'portfolios', 'projects',
+    'team_members', 'teams',
+    'users', 'organizations',
   ];
   db.pragma('foreign_keys = OFF');
   for (const t of tables) db.prepare(`DELETE FROM ${t}`).run();
@@ -138,6 +145,95 @@ function run() {
   award(e1, 60, 'bonus', 'Welcome bonus');
   award(e2, 35, 'bonus', 'Welcome bonus');
   award(e4, 20, 'bonus', 'Welcome bonus');
+
+  // ============================================================
+  // Project-management (Asana-style) demo data
+  // ============================================================
+  const PR = { none: 8, low: 6, medium: 12, high: 20 };
+  const team = (name, icon, desc) => db.prepare('INSERT INTO teams (org_id,name,icon,description) VALUES (?,?,?,?)').run(org, name, icon, desc || '').lastInsertRowid;
+  const tEng = team('Engineering', '⚙️', 'Builds the product');
+  const tMkt = team('Marketing', '📣', 'Grows the brand');
+  [admin, e1, e3, e5].forEach((u) => db.prepare('INSERT OR IGNORE INTO team_members (team_id,user_id) VALUES (?,?)').run(tEng, u));
+  [admin, e2, e3].forEach((u) => db.prepare('INSERT OR IGNORE INTO team_members (team_id,user_id) VALUES (?,?)').run(tMkt, u));
+
+  const project = (name, teamId, color, icon, view, desc, owner) =>
+    db.prepare('INSERT INTO projects (org_id,team_id,name,description,color,icon,owner_id,default_view) VALUES (?,?,?,?,?,?,?,?)')
+      .run(org, teamId, name, desc || '', color, icon, owner, view).lastInsertRowid;
+  const section = (pid, name, pos) => db.prepare('INSERT INTO sections (project_id,name,position) VALUES (?,?,?)').run(pid, name, pos).lastInsertRowid;
+  const member = (pid, uid, fav) => db.prepare('INSERT OR IGNORE INTO project_members (project_id,user_id,is_favorite) VALUES (?,?,?)').run(pid, uid, fav || 0);
+  const pmtask = (pid, sid, name, opts = {}) => {
+    const pr = opts.priority || 'none';
+    const r = db.prepare(`INSERT INTO pm_tasks (org_id,project_id,section_id,name,notes,assignee_id,created_by,start_date,due_date,priority,is_milestone,points,completed,completed_at,position)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(org, pid, sid, name, opts.notes || '', opts.assignee || null, admin, opts.start || null, opts.due || null, pr, opts.milestone ? 1 : 0, PR[pr], opts.completed ? 1 : 0, opts.completed ? new Date().toISOString() : null, opts.pos || 0);
+    const id = r.lastInsertRowid;
+    if (opts.assignee) { db.prepare('INSERT OR IGNORE INTO task_followers (task_id,user_id) VALUES (?,?)').run(id, opts.assignee); if (opts.completed) award(opts.assignee, PR[pr], 'task', `Completed: ${name}`), db.prepare('UPDATE pm_tasks SET awarded=1 WHERE id=?').run(id); }
+    return id;
+  };
+  const subtask = (pid, parent, name, assignee, done) => db.prepare('INSERT INTO pm_tasks (org_id,project_id,parent_id,name,assignee_id,created_by,priority,points,completed) VALUES (?,?,?,?,?,?,?,?,?)').run(org, pid, parent, name, assignee || null, admin, 'none', PR.none, done ? 1 : 0).lastInsertRowid;
+  const comment = (tid, uid, body) => db.prepare('INSERT INTO pm_comments (task_id,user_id,body) VALUES (?,?,?)').run(tid, uid, body).lastInsertRowid;
+  const activity = (tid, uid, type, detail) => db.prepare('INSERT INTO pm_activity (task_id,user_id,type,detail) VALUES (?,?,?,?)').run(tid, uid, type, detail || '');
+
+  // Project 1: Website Revamp (board)
+  const p1 = project('Website Revamp', tEng, '#7c9bff', '🚀', 'board', 'Redesign and ship the new marketing website.', admin);
+  [admin, e1, e3, e5].forEach((u, i) => member(p1, u, i === 0 ? 1 : 0));
+  const p1s = ['To Do', 'In Progress', 'In Review', 'Done'].map((n, i) => section(p1, n, i));
+  db.prepare("INSERT INTO custom_fields (project_id,name,type,options,position) VALUES (?,?,?,?,?)").run(p1, 'Effort', 'dropdown', JSON.stringify(['S', 'M', 'L', 'XL']), 0);
+  const t1 = pmtask(p1, p1s[1], 'Design new homepage hero', { assignee: e3, priority: 'high', due: '2026-06-25', notes: 'Match the new brand guidelines.', milestone: false });
+  subtask(p1, t1, 'Gather references', e3, true); subtask(p1, t1, 'Low-fi wireframe', e3, true); subtask(p1, t1, 'High-fi mockup', e3, false);
+  comment(t1, admin, 'Looking great so far! Can we try a bolder headline? @noor'); comment(t1, e3, 'On it — pushing a v2 today.');
+  activity(t1, admin, 'created', 'Design new homepage hero'); activity(t1, e3, 'comment', '');
+  pmtask(p1, p1s[0], 'Set up analytics', { assignee: e1, priority: 'medium', due: '2026-06-30' });
+  pmtask(p1, p1s[0], 'Write homepage copy', { assignee: e2, priority: 'medium', due: '2026-07-02' });
+  pmtask(p1, p1s[1], 'Build responsive nav', { assignee: e1, priority: 'high', start: '2026-06-18', due: '2026-06-28' });
+  pmtask(p1, p1s[2], 'QA cross-browser', { assignee: e5, priority: 'low', due: '2026-07-05' });
+  pmtask(p1, p1s[3], 'Project kickoff', { assignee: admin, completed: true, priority: 'low', milestone: true });
+  pmtask(p1, p1s[3], 'Domain & hosting ready', { assignee: e1, completed: true, priority: 'medium' });
+
+  // Project 2: Q3 Product Launch (list)
+  const p2 = project('Q3 Product Launch', tMkt, '#34e0ff', '📣', 'list', 'Coordinate the cross-functional Q3 launch.', e2);
+  [admin, e2, e3, e5].forEach((u) => member(p2, u, 0));
+  const p2s = ['Planning', 'Execution', 'Launch', 'Done'].map((n, i) => section(p2, n, i));
+  pmtask(p2, p2s[0], 'Finalize launch date', { assignee: e2, priority: 'high', due: '2026-06-22', milestone: true });
+  pmtask(p2, p2s[0], 'Press kit & assets', { assignee: e3, priority: 'medium', due: '2026-06-26' });
+  pmtask(p2, p2s[1], 'Email campaign', { assignee: e2, priority: 'medium', due: '2026-07-01' });
+  pmtask(p2, p2s[1], 'Social media schedule', { assignee: e5, priority: 'low', due: '2026-07-03' });
+  pmtask(p2, p2s[2], 'Go live 🎉', { assignee: e2, priority: 'high', due: '2026-07-10', milestone: true });
+
+  // Project 3: Customer Support Ops (board) with a rule + form
+  const p3 = project('Support Ops', tEng, '#2ce6a8', '🎧', 'board', 'Track and resolve customer issues.', e4);
+  [admin, e4, e1].forEach((u) => member(p3, u, 0));
+  const p3s = ['New', 'Investigating', 'Resolved'].map((n, i) => section(p3, n, i));
+  pmtask(p3, p3s[0], 'Login bug on Safari', { assignee: e4, priority: 'high', due: '2026-06-21' });
+  pmtask(p3, p3s[1], 'Billing export slow', { assignee: e1, priority: 'medium' });
+  pmtask(p3, p3s[2], 'Password reset email', { assignee: e4, completed: true, priority: 'low' });
+  db.prepare('INSERT INTO rules (project_id,name,trigger_type,trigger_value,action_type,action_value) VALUES (?,?,?,?,?,?)').run(p3, 'Auto-assign new tickets', 'task_added', '', 'set_assignee', String(e4));
+  db.prepare("UPDATE projects SET form_enabled=1, form_title=?, form_fields=? WHERE id=?").run('Report an issue', JSON.stringify(['Steps to reproduce', 'Severity']), p3);
+
+  // Tags
+  const tag = (n, c) => db.prepare('INSERT INTO tags (org_id,name,color) VALUES (?,?,?)').run(org, n, c).lastInsertRowid;
+  const tagBug = tag('bug', '#ff5d73'), tagFeat = tag('feature', '#7c9bff'), tagUrgent = tag('urgent', '#ffab2e'), tagDesign = tag('design', '#b56bff');
+  db.prepare('INSERT OR IGNORE INTO task_tags (task_id,tag_id) VALUES (?,?)').run(t1, tagDesign);
+  db.prepare('INSERT OR IGNORE INTO task_tags (task_id,tag_id) VALUES (?,?)').run(t1, tagUrgent);
+
+  // Portfolio
+  const pf = db.prepare('INSERT INTO portfolios (org_id,name,description,owner_id,color) VALUES (?,?,?,?,?)').run(org, 'Company OKRs 2026', 'All strategic initiatives', admin, '#34e0ff').lastInsertRowid;
+  [p1, p2].forEach((pid) => db.prepare('INSERT OR IGNORE INTO portfolio_projects (portfolio_id,project_id) VALUES (?,?)').run(pf, pid));
+
+  // Goals
+  const goal = (name, owner, status, prog, due) => db.prepare('INSERT INTO goals (org_id,name,owner_id,status,progress,due_date) VALUES (?,?,?,?,?,?)').run(org, name, owner, status, prog, due).lastInsertRowid;
+  const g1 = goal('Grow MRR to $100k', admin, 'on_track', 65, '2026-09-30');
+  const g2 = goal('Launch v2 of the product', e2, 'at_risk', 40, '2026-07-31');
+  goal('Improve CSAT to 95%', e4, 'on_track', 80, '2026-08-15');
+  db.prepare('INSERT OR IGNORE INTO goal_projects (goal_id,project_id) VALUES (?,?)').run(g2, p2);
+  db.prepare('INSERT OR IGNORE INTO goal_projects (goal_id,project_id) VALUES (?,?)').run(g1, p1);
+
+  // A couple of status updates + notifications already created via comments above
+  db.prepare('INSERT INTO status_updates (project_id,user_id,status,title,body) VALUES (?,?,?,?,?)').run(p1, admin, 'on_track', 'Week 1 going strong', 'Design is ahead of schedule, engineering ramping up.');
+  db.prepare('INSERT INTO status_updates (project_id,user_id,status,title,body) VALUES (?,?,?,?,?)').run(p2, e2, 'at_risk', 'Waiting on assets', 'Launch date may slip if press kit is late.');
+
+  // Seed inbox notifications for a few users
+  db.prepare('INSERT INTO notifications (org_id,user_id,actor_id,type,task_id,project_id,text) VALUES (?,?,?,?,?,?,?)').run(org, e3, admin, 'mention', t1, p1, 'mentioned you on "Design new homepage hero"');
+  db.prepare('INSERT INTO notifications (org_id,user_id,actor_id,type,task_id,project_id,text) VALUES (?,?,?,?,?,?,?)').run(org, e1, admin, 'assigned', null, p1, 'assigned you "Build responsive nav"');
 
   console.log('Seed complete.');
   console.log('--------------------------------------------------');

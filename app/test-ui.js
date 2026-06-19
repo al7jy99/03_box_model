@@ -40,6 +40,21 @@ function fakeData(method, p) {
                          { rank: 4, id: 4, name: 'D', avatar: '🐼', title: 't', points: 40, stars: 20, level: 1 }],
     'GET /me/profile': { user: u, badges: [{ id: 'rookie', icon: '🌱', name: 'Rookie', desc: 'd', earned: true }, { id: 'x', icon: '🏅', name: 'X', desc: 'd', earned: false }],
       transactions: [{ amount: 10, kind: 'task', reason: 'r', created_at: '2026-01-01 00:00:00' }] },
+    // ---- project management ----
+    'GET /pm/inbox/count': { unread: 2 },
+    'GET /pm/people': [{ id: 1, name: 'Me', avatar: '🙂', title: 't' }, { id: 2, name: 'Other', avatar: '😎', title: 't' }],
+    'GET /pm/teams': [{ id: 1, name: 'Eng', icon: '⚙️', members: 3, projects: 2, joined: 1 }],
+    'GET /pm/projects': [{ id: 1, name: 'Website', description: 'd', color: '#7c9bff', icon: '🚀', status: 'on_track', progress: 50, task_total: 4, task_done: 2, members: 3, favorite: true, team: { name: 'Eng', icon: '⚙️' } }],
+    'GET /pm/my-tasks': [{ id: 1, name: 'Do thing', completed: 0, due_date: '2026-06-19', priority: 'high', is_milestone: 0, tags: [], project_name: 'Website', project_color: '#7c9bff', project_icon: '🚀', assignee: u, counts: {} }],
+    'GET /pm/inbox': [{ id: 1, type: 'mention', text: 'mentioned you', is_read: 0, actor_name: 'A', actor_avatar: '🙂', task_id: 1, project_name: 'Website', created_at: '2026-01-01 00:00:00' }],
+    'GET /pm/goals': [{ id: 1, name: 'Grow', status: 'on_track', progress: 60, owner_name: 'A', owner_avatar: '🙂', linked: 2, due_date: '2026-09-01' }],
+    'GET /pm/portfolios': [{ id: 1, name: 'OKRs', description: 'd', color: '#34e0ff', progress: 45, project_count: 3 }],
+    'GET /pm/workload': [{ id: 1, name: 'A', avatar: '🙂', open: 5, overdue: 1, done: 3, capacity: 62 }],
+    'GET /pm/reporting': { totalTasks: 10, completed: 6, overdue: 2, projects: 3, completionRate: 60,
+      byPriority: [{ priority: 'high', c: 2 }, { priority: 'medium', c: 3 }, { priority: 'low', c: 1 }, { priority: 'none', c: 1 }],
+      byProject: [{ name: 'Website', color: '#7c9bff', total: 4, done: 2 }],
+      byAssignee: [{ name: 'A', avatar: '🙂', total: 5, done: 3 }],
+      trend: [{ d: '2026-06-18', c: 2 }, { d: '2026-06-19', c: 1 }] },
   };
   return map[`${method} ${p}`] ?? {};
 }
@@ -95,10 +110,11 @@ async function main() {
   await tick();
   assert(document.querySelector('.auth-card'), 'auth screen renders');
 
+  const pm = ['projects', 'mywork', 'inbox', 'goals', 'portfolios', 'reporting'];
   const roles = {
     super_admin: ['overview', 'orgs'],
-    org_admin: ['dashboard', 'tasks', 'challenges', 'ideas', 'rewards', 'redemptions', 'members', 'leaderboard'],
-    employee: ['home', 'tasks', 'challenges', 'ideas', 'shop', 'leaderboard', 'profile'],
+    org_admin: ['dashboard', 'tasks', 'challenges', 'ideas', 'rewards', 'redemptions', 'members', 'leaderboard', ...pm],
+    employee: ['home', 'tasks', 'challenges', 'ideas', 'shop', 'leaderboard', 'profile', ...pm],
   };
 
   for (const role of Object.keys(roles)) {
