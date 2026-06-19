@@ -13,6 +13,124 @@ const state = {
 const EMOJIS = ['🙂','😎','👩‍💻','🧑‍💼','🎨','🎧','📊','🚀','🦊','🐼','🦁','🐯','🌟','🔥','⚡','🍀','🎯','🧠','💎','👑','🦸','🧑‍🔬'];
 const REWARD_ICONS = ['🍕','☕','🎁','🏖️','🧥','💳','🅿️','🍽️','🎟️','🎮','📚','🏆','🎉','💰','🍩','🎫'];
 
+/* ============================================================
+   FX engine — sound, confetti, floating XP, celebrations
+   ============================================================ */
+const FX = (() => {
+  let soundOn = localStorage.getItem('sb_sound') !== 'off';
+  let actx = null;
+  const ac = () => (actx || (actx = new (window.AudioContext || window.webkitAudioContext)()));
+
+  function tone(freq, dur, type = 'sine', gain = 0.06, when = 0) {
+    if (!soundOn) return;
+    try {
+      const ctx = ac(); const t = ctx.currentTime + when;
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur);
+    } catch {}
+  }
+  const seq = (notes, type, gain) => notes.forEach(([f, w, d]) => tone(f, d || 0.16, type, gain, w));
+
+  const sound = (kind) => {
+    switch (kind) {
+      case 'click': tone(420, 0.06, 'triangle', 0.04); break;
+      case 'success': seq([[660, 0], [880, 0.08]], 'triangle', 0.05); break;
+      case 'coin': seq([[988, 0], [1319, 0.07]], 'square', 0.04); break;
+      case 'levelup': seq([[523, 0], [659, 0.1], [784, 0.2], [1047, 0.32, 0.4]], 'triangle', 0.06); break;
+      case 'reward': seq([[784, 0], [988, 0.09], [1319, 0.2, 0.4]], 'triangle', 0.06); break;
+      case 'error': tone(180, 0.22, 'sawtooth', 0.05); break;
+      case 'whoosh': tone(300, 0.18, 'sine', 0.03); break;
+    }
+  };
+
+  // confetti
+  let canvas, ctx, pieces = [], raf = null;
+  function ensureCanvas() {
+    if (canvas) return;
+    canvas = document.createElement('canvas'); canvas.id = 'fx-canvas';
+    document.body.appendChild(canvas);
+    ctx = canvas.getContext('2d'); resize();
+    window.addEventListener('resize', resize);
+  }
+  function resize() { if (!canvas) return; canvas.width = innerWidth; canvas.height = innerHeight; }
+  const COLORS = ['#ffd23f', '#34e0ff', '#7c9bff', '#b56bff', '#ff5fa2', '#2ce6a8', '#ff9d2e'];
+  function confetti(x, y, count = 90) {
+    ensureCanvas();
+    x = x == null ? innerWidth / 2 : x; y = y == null ? innerHeight / 3 : y;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 4 + Math.random() * 9;
+      pieces.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 4, g: 0.18 + Math.random() * 0.12,
+        s: 5 + Math.random() * 7, c: COLORS[(Math.random() * COLORS.length) | 0], rot: Math.random() * 6.28,
+        vr: (Math.random() - 0.5) * 0.4, life: 70 + Math.random() * 40, t: 0, shape: Math.random() < 0.4 });
+    }
+    if (!raf) loop();
+  }
+  function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    pieces = pieces.filter(p => p.t < p.life);
+    pieces.forEach(p => {
+      p.t++; p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.c;
+      if (p.shape) { ctx.beginPath(); ctx.arc(0, 0, p.s / 2, 0, 6.28); ctx.fill(); }
+      else ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.6);
+      ctx.restore();
+    });
+    if (pieces.length) raf = requestAnimationFrame(loop); else { cancelAnimationFrame(raf); raf = null; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+  }
+
+  // floating "+XP" text
+  function floatText(text, x, y, color) {
+    const d = document.createElement('div'); d.className = 'float-xp'; d.textContent = text;
+    if (color) d.style.color = color;
+    d.style.left = (x - 20) + 'px'; d.style.top = (y - 20) + 'px';
+    document.body.appendChild(d); setTimeout(() => d.remove(), 1300);
+  }
+  // emit float from an event/element
+  function pop(text, evtOrEl, color) {
+    let x = innerWidth / 2, y = innerHeight / 2;
+    if (evtOrEl && evtOrEl.clientX != null) { x = evtOrEl.clientX; y = evtOrEl.clientY; }
+    else if (evtOrEl && evtOrEl.getBoundingClientRect) { const r = evtOrEl.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top; }
+    floatText(text, x, y, color);
+  }
+
+  // full-screen celebration
+  function celebrate(emoji, title, sub) {
+    sound('levelup'); confetti(innerWidth / 2, innerHeight / 3, 140);
+    const o = document.createElement('div'); o.className = 'celebrate-overlay';
+    o.innerHTML = `<div class="celebrate-card"><div class="big">${emoji}</div><h2>${title}</h2><p>${sub || ''}</p></div>`;
+    document.body.appendChild(o);
+    setTimeout(() => confetti(innerWidth / 3, innerHeight / 2.5, 80), 250);
+    setTimeout(() => confetti(innerWidth * 2 / 3, innerHeight / 2.5, 80), 450);
+    const close = () => { o.style.opacity = '0'; o.style.transition = 'opacity .3s'; setTimeout(() => o.remove(), 300); };
+    o.addEventListener('click', close); setTimeout(close, 2600);
+  }
+
+  // count-up numbers inside a container
+  function animateCounts(root) {
+    root.querySelectorAll('[data-count]').forEach(el => {
+      const to = parseInt(el.getAttribute('data-count'), 10);
+      if (isNaN(to)) return;
+      const dur = 700, start = performance.now();
+      const step = (now) => {
+        const p = Math.min(1, (now - start) / dur);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(to * e).toLocaleString();
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  const toggle = () => { soundOn = !soundOn; localStorage.setItem('sb_sound', soundOn ? 'on' : 'off'); if (soundOn) sound('success'); return soundOn; };
+  const isOn = () => soundOn;
+  return { sound, confetti, pop, floatText, celebrate, animateCounts, toggle, isOn };
+})();
+
 /* ---------------- helpers ---------------- */
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(API + path, {
@@ -35,6 +153,7 @@ function toast(msg, type = '') {
   t.className = 'toast ' + type;
   t.textContent = msg;
   wrap.appendChild(t);
+  FX.sound(type === 'error' ? 'error' : type === 'success' ? 'success' : 'click');
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 3200);
 }
 
@@ -130,6 +249,7 @@ function renderAuth(root) {
       state.token = out.token; state.user = out.user; state.org = out.org;
       localStorage.setItem('sb_token', out.token);
       toast('Welcome, ' + out.user.name.split(' ')[0] + '!', 'success');
+      FX.sound('whoosh'); setTimeout(() => FX.confetti(window.innerWidth / 2, window.innerHeight / 2.2, 110), 200);
       state.page = null;
       render();
     } catch (err) {
@@ -196,6 +316,7 @@ function renderShell(root) {
         <div class="av">${esc(state.user.avatar)}</div>
         <div class="grow"><div class="nm">${esc(state.user.name)}</div><div class="rl">Platform owner</div></div>
       </div>`}
+      <button class="sound-toggle" id="soundBtn" style="margin-bottom:8px"><span id="soundIc">${FX.isOn() ? '🔊' : '🔇'}</span> Sound ${FX.isOn() ? 'on' : 'off'}</button>
       <button class="nav-item" id="logoutBtn"><span class="ic">🚪</span> Sign out</button>
     </aside>
     <div>
@@ -211,6 +332,10 @@ function renderShell(root) {
     b.addEventListener('click', () => { state.page = b.dataset.page; document.getElementById('sidebar').classList.remove('open'); renderShell(root); })
   );
   root.querySelector('#logoutBtn').addEventListener('click', logout);
+  root.querySelector('#soundBtn').addEventListener('click', (e) => {
+    const on = FX.toggle();
+    e.currentTarget.innerHTML = `<span>${on ? '🔊' : '🔇'}</span> Sound ${on ? 'on' : 'off'}`;
+  });
   const menuBtn = root.querySelector('#menuBtn');
   if (menuBtn) menuBtn.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
@@ -221,40 +346,41 @@ function setHead(title, sub, actions = '') {
   return `<div class="page-head"><div><h1>${title}</h1><p>${sub}</p></div><div class="row wrap">${actions}</div></div>`;
 }
 
+const ROUTES = {
+  super_admin: { overview: [pageSuperOverview], orgs: [pageSuperOrgs] },
+  org_admin: {
+    dashboard: [pageAdminDashboard], tasks: [pageTasks, true], challenges: [pageChallenges, true],
+    ideas: [pageIdeas, true], rewards: [pageRewardsAdmin], redemptions: [pageRedemptions, true],
+    members: [pageMembers], leaderboard: [pageLeaderboard],
+  },
+  employee: {
+    home: [pageEmployeeHome], tasks: [pageTasks, false], challenges: [pageChallenges, false],
+    ideas: [pageIdeas, false], shop: [pageShop], leaderboard: [pageLeaderboard], profile: [pageProfile],
+  },
+};
+
 async function routePage() {
   const el = document.getElementById('pageRoot');
-  el.innerHTML = `<div class="empty"><div class="ic">⏳</div><p>Loading…</p></div>`;
+  el.innerHTML = `<div class="loader"><span class="spin">⭐</span><p class="muted" style="margin-top:14px;font-family:var(--font-head)">Loading…</p></div>`;
   try {
-    const role = state.user.role;
-    const p = state.page;
-    if (role === 'super_admin') {
-      if (p === 'overview') return await pageSuperOverview(el);
-      if (p === 'orgs') return await pageSuperOrgs(el);
-    } else if (role === 'org_admin') {
-      if (p === 'dashboard') return await pageAdminDashboard(el);
-      if (p === 'tasks') return await pageTasks(el, true);
-      if (p === 'challenges') return await pageChallenges(el, true);
-      if (p === 'ideas') return await pageIdeas(el, true);
-      if (p === 'rewards') return await pageRewardsAdmin(el);
-      if (p === 'redemptions') return await pageRedemptions(el, true);
-      if (p === 'members') return await pageMembers(el);
-      if (p === 'leaderboard') return await pageLeaderboard(el);
-    } else {
-      if (p === 'home') return await pageEmployeeHome(el);
-      if (p === 'tasks') return await pageTasks(el, false);
-      if (p === 'challenges') return await pageChallenges(el, false);
-      if (p === 'ideas') return await pageIdeas(el, false);
-      if (p === 'shop') return await pageShop(el);
-      if (p === 'leaderboard') return await pageLeaderboard(el);
-      if (p === 'profile') return await pageProfile(el);
-    }
+    const entry = (ROUTES[state.user.role] || {})[state.page];
+    if (!entry) return;
+    const [fn, ...args] = entry;
+    await fn(el, ...args);
+    FX.animateCounts(el);
   } catch (err) {
-    el.innerHTML = `<div class="empty"><div class="ic">⚠️</div><p>${esc(err.message)}</p></div>`;
+    el.innerHTML = `<div class="empty"><div class="ic">😵</div><p>${esc(err.message)}</p></div>`;
   }
 }
 
 async function refreshUser() {
-  try { const me = await api('/auth/me'); state.user = me.user; state.org = me.org; } catch {}
+  const prevLevel = state.user ? state.user.level : 1;
+  try {
+    const me = await api('/auth/me'); state.user = me.user; state.org = me.org;
+    if (state.user.level > prevLevel) {
+      setTimeout(() => FX.celebrate('🎉', 'LEVEL UP!', `You reached level ${state.user.level}`), 350);
+    }
+  } catch {}
 }
 
 /* ---------------- SUPER ADMIN ---------------- */
@@ -436,11 +562,21 @@ function taskCard(t, isAdmin) {
 }
 
 function bindTaskActions(el, isAdmin) {
-  const act = async (id, path, msg) => { try { await api(`/tasks/${id}/${path}`, { method: 'POST' }); toast(msg, 'success'); await refreshUser(); renderShell(document.getElementById('root')); } catch (e) { toast(e.message, 'error'); } };
-  el.querySelectorAll('[data-claim]').forEach(b => b.addEventListener('click', () => act(b.dataset.claim, 'claim', 'Task claimed!')));
-  el.querySelectorAll('[data-submit]').forEach(b => b.addEventListener('click', () => act(b.dataset.submit, 'submit', 'Submitted for review')));
-  el.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => act(b.dataset.approve, 'approve', 'Approved & points awarded!')));
-  el.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => act(b.dataset.reject, 'reject', 'Sent back')));
+  const act = async (id, path, msg, ev, fx) => {
+    try {
+      await api(`/tasks/${id}/${path}`, { method: 'POST' });
+      toast(msg, 'success');
+      if (fx) fx(ev);
+      await refreshUser(); renderShell(document.getElementById('root'));
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  el.querySelectorAll('[data-claim]').forEach(b => b.addEventListener('click', (e) => { FX.sound('whoosh'); act(b.dataset.claim, 'claim', 'Task claimed! Time to shine ✨', e); }));
+  el.querySelectorAll('[data-submit]').forEach(b => b.addEventListener('click', (e) => act(b.dataset.submit, 'submit', 'Submitted for review 🚀', e, (ev) => { FX.sound('whoosh'); })));
+  el.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', (e) => {
+    const pts = b.textContent.replace(/[^0-9]/g, '');
+    act(b.dataset.approve, 'approve', 'Approved & points awarded! 🎉', e, (ev) => { FX.sound('coin'); FX.confetti(ev.clientX, ev.clientY, 70); if (pts) FX.pop('+' + pts + '★', ev); });
+  }));
+  el.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', (e) => act(b.dataset.reject, 'reject', 'Sent back', e)));
   el.querySelectorAll('[data-del-task]').forEach(b => b.addEventListener('click', async () => { if(!confirm('Delete this task?'))return; await api('/tasks/'+b.dataset.delTask,{method:'DELETE'}); toast('Deleted'); pageTasks(el, isAdmin); }));
 }
 
@@ -481,12 +617,13 @@ async function pageChallenges(el, isAdmin) {
     el.querySelectorAll('[data-edit-ch]').forEach(b => b.addEventListener('click', () => challengeModal(ch.find(c => c.id == b.dataset.editCh))));
     el.querySelectorAll('[data-del-ch]').forEach(b => b.addEventListener('click', async () => { if(!confirm('Delete challenge?'))return; await api('/challenges/'+b.dataset.delCh,{method:'DELETE'}); toast('Deleted'); routePage(); }));
   } else {
-    el.querySelectorAll('[data-join]').forEach(b => b.addEventListener('click', async () => { await api('/challenges/'+b.dataset.join+'/join',{method:'POST'}); toast('Joined challenge!','success'); routePage(); }));
-    el.querySelectorAll('[data-prog]').forEach(b => b.addEventListener('click', async () => {
+    el.querySelectorAll('[data-join]').forEach(b => b.addEventListener('click', async (e) => { FX.sound('whoosh'); await api('/challenges/'+b.dataset.join+'/join',{method:'POST'}); toast('Joined challenge! Let\'s go 🔥','success'); FX.pop('JOINED!', e, '#34e0ff'); routePage(); }));
+    el.querySelectorAll('[data-prog]').forEach(b => b.addEventListener('click', async (e) => {
       try { const r = await api('/challenges/'+b.dataset.prog+'/progress',{method:'POST',body:{amount:1}});
-        toast(r.completed ? '🎉 Challenge complete! Points awarded' : 'Progress logged','success');
+        if (r.completed) { FX.celebrate('🔥', 'CHALLENGE COMPLETE!', 'Points dropped into your balance'); }
+        else { FX.sound('coin'); FX.pop('+1', e, '#34e0ff'); toast('Progress logged 💪','success'); }
         await refreshUser(); renderShell(document.getElementById('root'));
-      } catch(e){ toast(e.message,'error'); }
+      } catch(e2){ toast(e2.message,'error'); }
     }));
   }
 }
@@ -539,8 +676,8 @@ async function pageIdeas(el, isAdmin) {
     <div class="grid cols-2">${ideas.length ? ideas.map(i => ideaCard(i, isAdmin)).join('') : emptyState('No ideas yet — be the first!','💡')}</div>`;
 
   if (!isAdmin) { const b = el.querySelector('#newIdea'); if (b) b.addEventListener('click', () => ideaModal()); }
-  el.querySelectorAll('[data-vote]').forEach(b => b.addEventListener('click', async () => {
-    try { const r = await api('/ideas/'+b.dataset.vote+'/vote',{method:'POST'}); toast(r.voted?'Upvoted':'Vote removed'); routePage(); } catch(e){ toast(e.message,'error'); }
+  el.querySelectorAll('[data-vote]').forEach(b => b.addEventListener('click', async (e) => {
+    try { const r = await api('/ideas/'+b.dataset.vote+'/vote',{method:'POST'}); if (r.voted) { FX.sound('coin'); FX.pop('▲', e, '#34e0ff'); } else FX.sound('click'); toast(r.voted?'Upvoted! 👍':'Vote removed'); routePage(); } catch(e2){ toast(e2.message,'error'); }
   }));
   if (isAdmin) {
     el.querySelectorAll('[data-status]').forEach(s => s.addEventListener('change', async () => {
@@ -581,7 +718,7 @@ function ideaModal() {
     </form>`);
   document.getElementById('ideaForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    try { await api('/ideas',{method:'POST',body:Object.fromEntries(new FormData(ev.target))}); closeModal(); toast('Idea submitted! +5 stars','success'); await refreshUser(); renderShell(document.getElementById('root')); }
+    try { await api('/ideas',{method:'POST',body:Object.fromEntries(new FormData(ev.target))}); closeModal(); toast('Idea submitted! +5 stars 💡','success'); FX.sound('coin'); FX.confetti(window.innerWidth/2, window.innerHeight/2.3, 60); FX.floatText('+5★', window.innerWidth/2, window.innerHeight/2.3); await refreshUser(); renderShell(document.getElementById('root')); }
     catch(err){ toast(err.message,'error'); }
   });
 }
@@ -654,7 +791,9 @@ async function pageShop(el) {
 
   el.querySelectorAll('[data-redeem]').forEach(b => b.addEventListener('click', async () => {
     if (!confirm('Redeem this reward with your stars?')) return;
-    try { const r = await api('/rewards/'+b.dataset.redeem+'/redeem',{method:'POST'}); state.user = r.user; toast('🎉 Redeemed! Pending fulfilment','success'); renderShell(document.getElementById('root')); }
+    const icon = b.closest('.card').querySelector('.ic')?.textContent || '🎁';
+    const title = b.closest('.card').querySelector('.title-strong')?.textContent || 'Reward';
+    try { const r = await api('/rewards/'+b.dataset.redeem+'/redeem',{method:'POST'}); state.user = r.user; FX.celebrate(icon, 'REDEEMED!', `${title} — pending fulfilment`); toast('Redeemed! Check with your admin 🎁','success'); renderShell(document.getElementById('root')); }
     catch(e){ toast(e.message,'error'); }
   }));
 }
@@ -839,7 +978,9 @@ async function pageProfile(el) {
 
 /* ---------------- small components ---------------- */
 function stat(lbl, val, ic, brand) {
-  return `<div class="stat ${brand?'brand':''}"><div class="ic">${ic}</div><div class="lbl">${lbl}</div><div class="val">${val}</div></div>`;
+  const numeric = typeof val === 'number' || (/^\d+$/.test(String(val)));
+  const valHtml = numeric ? `<div class="val" data-count="${parseInt(val,10)}">0</div>` : `<div class="val">${val}</div>`;
+  return `<div class="stat ${brand?'brand':''}"><div class="ic">${ic}</div><div class="lbl">${lbl}</div>${valHtml}</div>`;
 }
 function emptyState(msg, ic) {
   return `<div class="empty" style="grid-column:1/-1"><div class="ic">${ic}</div><p>${msg}</p></div>`;

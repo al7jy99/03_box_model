@@ -7,12 +7,16 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node seed.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node test-ui.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
   }
 }

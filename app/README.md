@@ -21,6 +21,7 @@ It ships with three fully working portals:
 - **Idea box** — employees submit ideas, everyone upvotes, admins move them through `pending → under review → approved → implemented`. Approved/implemented ideas pay bonus stars.
 - **Rewards & redemptions** — admins define a catalog (cost in stars, stock, icon). Employees redeem; stars are deducted immediately and refunded automatically if a request is rejected.
 - **Gamification** — points vs. spendable stars, levels with an XP curve, a live leaderboard, and computed achievement badges.
+- **Game-like experience** — a playful arcade UI with an animated starfield, rounded game fonts, chunky 3D buttons, glassmorphism, confetti bursts, floating "+XP" pops, full-screen level-up / reward celebrations, animated count-up stats, and optional sound effects (synthesized in the browser, with a mute toggle).
 - **Auth & security** — bcrypt password hashing, JWT sessions, role-based access control on every endpoint.
 
 ## Tech stack
@@ -35,6 +36,7 @@ cd app
 npm install
 npm run seed     # creates the database + demo data (re-runnable)
 npm start        # http://localhost:3000
+npm test         # optional: headless smoke test of every screen
 ```
 
 Then open <http://localhost:3000>.
